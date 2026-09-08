@@ -23,7 +23,9 @@ from dfs.ingest.salaries import expand_roster_eligibility, parse_salaries
 from dfs.optimizer.lineup import Lineup, exposure_report, optimize_lineups
 from dfs.optimizer.rules import OptimizerSettings, cash_settings, gpp_settings
 from dfs.ownership.leverage import apply_leverage, leverage_board
+from dfs.ingest.teams import is_defence
 from dfs.projections.baseline import build_pool_rates, project_player
+from dfs.projections.defence import blend_with_matchup, concession_levels
 from dfs.sports import SportConfig, get_config, score_stat_line
 
 
@@ -145,6 +147,19 @@ def project_slate(
 
     pool_rates = build_pool_rates(pool, logs_by_player, config)
 
+    # How generous each offence has been to defences. Measured across
+    # every defence in the history rather than per player, and only
+    # computed when the pool actually contains one.
+    levels: dict[str, float] = {}
+    league_mean = 0.0
+    if any(is_defence(player.get("positions") or []) for player in pool):
+        levels, league_mean = concession_levels(
+            database.logs_by_player_prefix(
+                f"{config.sport.lower()}:dst:", before=slate_date
+            ),
+            config,
+        )
+
     projected: list[dict[str, Any]] = []
     fallback_count = 0
 
@@ -161,6 +176,26 @@ def project_slate(
             record["projected_opportunity"] = projection.projected_opportunity
             record["projection_note"] = projection.notes
             record["projection_source"] = "model"
+
+            # A defence's own form is worth almost nothing on its own;
+            # the offence it is facing is most of the signal. Applied
+            # after the model projection rather than inside it, because
+            # this replaces the level rather than scaling the rate.
+            if is_defence(record.get("positions") or []):
+                blended, note = blend_with_matchup(
+                    projection.projected_points,
+                    record.get("opponent"),
+                    levels,
+                    league_mean,
+                )
+                shift = blended - projection.projected_points
+                record["projected_points"] = round(blended, 3)
+                record["ceiling"] = round(projection.ceiling + shift, 3)
+                record["floor"] = round(projection.floor + shift, 3)
+                record["projection_note"] = " ".join(
+                    part for part in (projection.notes, note) if part
+                )
+                record["projection_source"] = "model+matchup"
         else:
             average = float(record.get("site_avg_points") or 0.0)
             record["projected_points"] = round(average, 3)

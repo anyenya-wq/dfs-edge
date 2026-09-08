@@ -16,7 +16,9 @@ into the linear rates.
 
 from __future__ import annotations
 
-from dfs.sports.base import Bonus, RosterSlot, SportConfig, StackRule
+import math
+
+from dfs.sports.base import Bonus, RosterSlot, SportConfig, StackRule, TieredScore
 
 # Football's correlation structure is the strongest in daily fantasy.
 # A quarterback cannot throw a touchdown without a receiver catching
@@ -69,6 +71,42 @@ _FD_SCORING = {
     "return_td": 6.0,
 }
 
+# Defence scores on a different axis from everyone else -- takeaways
+# and points prevented rather than yards gained -- so it gets its own
+# table rather than sharing keys with the skill positions. Keeping them
+# apart also means a stray key in one table cannot silently pay out in
+# the other.
+#
+# Both sites use the same shape here, and very nearly the same numbers.
+# The one thing to watch is that a defence's floor is unusually deep:
+# the bottom points-allowed band is -4, so a unit facing a good offence
+# can post a negative score, which no skill player can do.
+_DST_SCORING = {
+    "sack": 1.0,
+    "def_int": 2.0,
+    "fumble_recovery": 2.0,
+    "safety": 2.0,
+    "def_td": 6.0,
+    "return_td": 6.0,
+    "blocked_kick": 2.0,
+}
+
+# Points allowed, banded. Read as "up to this many points, this many
+# fantasy points": a shutout pays 10, and 35 or more costs 4.
+_POINTS_ALLOWED = TieredScore(
+    stat="points_allowed",
+    bands=(
+        (0, 10.0),
+        (6, 7.0),
+        (13, 4.0),
+        (20, 1.0),
+        (27, 0.0),
+        (34, -1.0),
+        (math.inf, -4.0),
+    ),
+)
+
+
 DK_NFL = SportConfig(
     sport="NFL",
     site="DK",
@@ -91,6 +129,9 @@ DK_NFL = SportConfig(
     max_per_team=None,
     min_games=2,
     stack_shapes=_STACKS,
+    alt_scoring_positions=("DST", "DEF"),
+    alt_scoring=_DST_SCORING,
+    tiers=(_POINTS_ALLOWED,),
 )
 
 FD_NFL = SportConfig(
@@ -113,4 +154,7 @@ FD_NFL = SportConfig(
     max_per_team=4,
     min_games=2,
     stack_shapes=_STACKS,
+    alt_scoring_positions=("DST", "DEF"),
+    alt_scoring=_DST_SCORING,
+    tiers=(_POINTS_ALLOWED,),
 )

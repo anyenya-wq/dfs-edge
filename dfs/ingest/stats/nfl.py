@@ -35,6 +35,9 @@ from typing import Any
 
 from dfs.ingest.salaries import player_id as make_player_id
 from dfs.ingest.stats.common import write_records
+from dfs.ingest.stats.nfl_defence import (
+    ScoreboardError, defence_records, fetch_scoreboard,
+)
 
 # nflverse renamed the release holding these files from `player_stats`
 # to `stats_player`, and only the new name carries seasons after 2024.
@@ -183,8 +186,14 @@ def available_seasons(last: int | None = None, count: int = 3) -> list[int]:
     return sorted(found)
 
 
-def fetch_season(season: int) -> Iterator[dict[str, Any]]:
-    """Download one season and yield normalised game-log records."""
+def season_rows(season: int) -> list[dict[str, str]]:
+    """Download one season's file and return its rows.
+
+    Separate from `fetch_season` because two things read the same file:
+    the player records, and the team defences aggregated from the
+    defenders in it. Downloading once and passing the rows around beats
+    fetching several megabytes twice.
+    """
 
     url = resolve_season_url(season)
 
@@ -200,7 +209,13 @@ def fetch_season(season: int) -> Iterator[dict[str, Any]]:
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as error:
         raise CollectorError(f"Could not download {url}: {error}") from error
 
-    for row in csv.DictReader(io.StringIO(payload)):
+    return list(csv.DictReader(io.StringIO(payload)))
+
+
+def fetch_season(season: int) -> Iterator[dict[str, Any]]:
+    """Download one season and yield normalised game-log records."""
+
+    for row in season_rows(season):
         record = _normalise_row(row, season)
         if record is not None:
             yield record
@@ -278,14 +293,49 @@ def load_nfl_history(
             "access to github.com."
         )
 
+    # Fetched once for every season rather than per season: it is a
+    # single file covering all of them, and a defence with no scoreboard
+    # entry is dropped rather than recorded, so failing to get it would
+    # silently collect no defences at all.
+    try:
+        scoreboard = fetch_scoreboard()
+    except ScoreboardError as error:
+        scoreboard = {}
+        scoreboard_error = str(error)
+    else:
+        scoreboard_error = None
+
     records = []
+    defences = 0
+
     for season in seasons:
-        for record in fetch_season(season):
+        rows = season_rows(season)
+
+        for row in rows:
+            record = _normalise_row(row, season)
+            if record is None:
+                continue
             if since and record["game_date"] < since:
                 continue
             records.append(record)
 
+        for record in defence_records(rows, season, scoreboard, week_date):
+            if since and record["game_date"] < since:
+                continue
+            records.append(record)
+            defences += 1
+
     summary = write_records(database, records, "NFL")
     summary["sport"] = "NFL"
     summary["seasons"] = seasons
+    summary["defences"] = defences
+
+    # Surfaced rather than raised. Player history is the larger part of
+    # the collection and is worth keeping even when the scoreboard is
+    # unreachable; the caller can say that defences are missing.
+    if scoreboard_error:
+        summary["warning"] = (
+            f"Team defences were not collected: {scoreboard_error}"
+        )
+
     return summary

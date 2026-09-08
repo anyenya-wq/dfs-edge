@@ -35,8 +35,13 @@ SITES = ("DK", "FD")
 # quietly become the basis for a real entry. Remove an entry once you
 # have confirmed it and set `rules_verified=True` on the config.
 VERIFICATION_NOTES: dict[str, str] = {
-    "NFL:DK": "Confirm the three yardage bonuses and full-PPR reception value.",
-    "NFL:FD": "Confirm half-PPR reception value and the -2 fumble penalty.",
+    "NFL:DK": ("Confirm the three yardage bonuses and full-PPR reception value. "
+               "Also the defence table: the points-allowed bands, and whether "
+               "points scored against your own offence count against the "
+               "defence."),
+    "NFL:FD": ("Confirm half-PPR reception value and the -2 fumble penalty. "
+               "The defence table is assumed identical to DraftKings' and has "
+               "not been checked against FanDuel's own rules."),
     "NBA:DK": "Confirm double-double 1.5 / triple-double 3.0 and the 2.0 steal-block rate.",
     "NBA:FD": "Confirm the 3.0 steal-block rate and that no double bonus is paid.",
     "MLB:DK": ("Scoring corroborated against independent sources, but not read "

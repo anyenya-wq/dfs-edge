@@ -56,6 +56,32 @@ class Bonus:
 
 
 @dataclasses.dataclass(frozen=True)
+class TieredScore:
+    """A step function over one stat, e.g. a defence's points allowed.
+
+    Separate from `Bonus` because this is a full partition rather than a
+    single threshold: every value falls in exactly one band, and the
+    bands run from strongly positive to strongly negative.
+
+    Applied only when `stat` is present in the line, and that condition
+    is load-bearing. A wide receiver's box score has no `points_allowed`
+    key at all; reading absence as zero would award him the shutout
+    bonus, which is both wrong and large.
+    """
+
+    stat: str
+    # (inclusive upper bound, points), lowest bound first. The final
+    # entry should use `math.inf` so every value lands somewhere.
+    bands: tuple[tuple[float, float], ...]
+
+    def points_for(self, value: float) -> float:
+        for bound, points in self.bands:
+            if value <= bound:
+                return points
+        return self.bands[-1][1]
+
+
+@dataclasses.dataclass(frozen=True)
 class StackRule:
     """A correlation shape worth enforcing during lineup construction.
 
@@ -105,6 +131,9 @@ class SportConfig:
     # (pitchers, goalies). Scored from `alt_scoring` when present.
     alt_scoring_positions: tuple[str, ...] = ()
     alt_scoring: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    # Step functions over a single stat, scored on top of the linear
+    # table. Only football uses these, for points allowed.
+    tiers: tuple[TieredScore, ...] = ()
     # False until a human has checked these numbers against the site's
     # published rules for the current season. Surfaced in the UI.
     rules_verified: bool = False
@@ -139,5 +168,11 @@ class SportConfig:
         for bonus in self.bonuses:
             if float(stats.get(bonus.stat, 0.0)) >= bonus.threshold:
                 total += bonus.points
+
+        for tier in self.tiers:
+            # Presence, not value: a line without the stat is a player
+            # the tier does not describe, not one who scored zero on it.
+            if tier.stat in stats:
+                total += tier.points_for(float(stats[tier.stat]))
 
         return round(total, 4)

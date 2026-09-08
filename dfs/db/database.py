@@ -674,6 +674,40 @@ class Database:
             logs.append(record)
         return logs
 
+    def logs_by_player_prefix(
+        self, prefix: str, before: str | None = None, limit: int = 2000
+    ) -> list[dict[str, Any]]:
+        """Every log whose player id starts with `prefix`.
+
+        Team defences are keyed `nfl:dst:<team>`, and projecting one
+        needs the whole set rather than one player's rows: how generous
+        an offence has been is measured across every defence that has
+        faced it.
+        """
+
+        if before:
+            rows = self.connection.execute(
+                """
+                SELECT * FROM game_logs
+                WHERE player_id LIKE ? AND game_date < ?
+                ORDER BY game_date DESC LIMIT ?
+                """,
+                (f"{prefix}%", before, limit),
+            ).fetchall()
+        else:
+            rows = self.connection.execute(
+                "SELECT * FROM game_logs WHERE player_id LIKE ? ORDER BY game_date DESC LIMIT ?",
+                (f"{prefix}%", limit),
+            ).fetchall()
+
+        logs = []
+        for row in rows:
+            record = dict(row)
+            record["stats"] = json.loads(record["stats"] or "{}")
+            record["home"] = bool(record["home"])
+            logs.append(record)
+        return logs
+
     # ------------------------------------------------------------------
     # Projections, actuals, lineups, briefs
     # ------------------------------------------------------------------

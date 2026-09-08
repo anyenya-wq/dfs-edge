@@ -30,6 +30,7 @@ import unicodedata
 from collections.abc import Iterable, Iterator
 from typing import Any
 
+from dfs.ingest.teams import defence_id, is_defence
 from dfs.sports import SportConfig
 
 # Suffixes that appear inconsistently between a salary file and a stats
@@ -56,6 +57,26 @@ def slugify_name(name: str) -> str:
 
 def player_id(name: str, sport: str) -> str:
     return f"{sport.lower()}:{slugify_name(name)}"
+
+
+def pool_player_id(name: str, sport: str, positions, team: str | None) -> str:
+    """The id a pool row should carry.
+
+    Skill players are identified by name, which is stable across both
+    sites. A team defence is not: DraftKings writes `Ravens`, FanDuel
+    writes it differently, and the collected history has no row under
+    either -- so a defence is identified by its team instead, and the
+    two sites land on the same id.
+
+    Falls back to the name when the team is missing or unrecognised.
+    That produces an unmatched defence rather than one joined to the
+    wrong team's history, which is the failure worth having.
+    """
+
+    if is_defence(positions):
+        return defence_id(team, sport) or player_id(name, sport)
+
+    return player_id(name, sport)
 
 
 def _split_positions(raw: str | None) -> list[str]:
@@ -139,7 +160,7 @@ def parse_draftkings(source: str | Iterable[str], sport: str) -> list[dict[str, 
 
         pool.append(
             {
-                "player_id": player_id(name, sport),
+                "player_id": pool_player_id(name, sport, positions, team),
                 "name": name,
                 "sport": sport.upper(),
                 "team": team,
@@ -188,7 +209,7 @@ def parse_fanduel(source: str | Iterable[str], sport: str) -> list[dict[str, Any
 
         pool.append(
             {
-                "player_id": player_id(name, sport),
+                "player_id": pool_player_id(name, sport, positions, team),
                 "name": name,
                 "sport": sport.upper(),
                 "team": team,

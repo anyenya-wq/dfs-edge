@@ -7,7 +7,7 @@ the order they look most interesting in.
 
 **NFL and NBA are built**, and load automatically on first use.
 Backtested skill over the season-average baseline: NBA +0.075, NFL
-+0.037.
++0.037, NFL team defences +0.088.
 
 NBA deliberately uses hoopR's published box scores rather than `nba_api`.
 `nba_api` talks to stats.nba.com, which rate-limits hard and refuses
@@ -49,9 +49,19 @@ Write one collector per sport that normalises into `game_logs`, following
 the NFL one. The projection engine reads that table and does not care
 where rows came from, so each collector is independent.
 
-Also missing within NFL: team defences. nflverse's player file has no DST
-rows, so those fall back to the site average. Its team-level files could
-close that gap.
+**NFL team defences are built.** nflverse publishes no DST row, so the
+unit is aggregated from its own defenders, and points allowed is joined
+from the scoreboard. Sacks are read from the offence that suffered them
+rather than the defenders credited with them: across 2024 the two counts
+agree on 560 of 570 team-games, and all ten disagreements are a sack no
+defender was credited with.
+
+The projection is not the player model. Measured over 2023 and 2024, a
+defence's own recent form beats the season-average baseline by +0.007 --
+noise. The offence it is about to face is worth +0.046 alone, and a
+half-and-half blend, with the weight chosen on 2023, is worth **+0.088
+on held-out 2024**. A defence projected from its own history is worth
+nothing; the matchup is the projection.
 
 ## 2. Hosting — done
 

@@ -333,9 +333,11 @@ last five days — true for eight months of the year. What it does *not* have ye
   usable while rankings across positions skew toward defenders. Combined
   with soccer's scoring tables being unverified, it is much the weakest
   of the five. The app says so in a banner rather than hiding it.
-- **Team defences.** nflverse's player file has no DST rows, so defences
-  fall back to the site average. About 8 of 160 players on a typical
-  slate, and the least consequential roster spot.
+- **A defence's own form.** It is worth +0.007 over the baseline, which
+  is noise, so the projection leans on the matchup instead (+0.088
+  blended). That is the best available from free data, but it means a
+  defence that has genuinely improved is priced almost entirely on who
+  it is playing.
 - **Real ownership data.** The ownership model is a value-based prior.
   Industry projections see actual entry behaviour and are better.
 - **A forward record.** The loop is wired — lock a slate before its games,
