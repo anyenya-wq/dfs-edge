@@ -25,6 +25,10 @@ from dfs.db.connection import is_postgres_url
 from dfs.db.database import Database
 from dfs.ingest.detect import detect
 from dfs.ingest.lineups import LineupError, fetch_mlb_lineups
+from dfs.availability import (
+    announced_starters, benched_hitters, ruled_out, sidelined_pitchers,
+    teams_with_posted_lineups,
+)
 from dfs.ingest.salaries import is_ruled_out
 from dfs.export import (
     ExportError, readable_filename, to_readable_csv, to_upload_csv, upload_filename,
@@ -415,18 +419,14 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
     # in the file rather than something to be typed in.
     announced = [
         player_id for player_id in starters
-        if by_id[player_id].get("starting") and not by_id[player_id].get("batting_order")
+        if player_id in announced_starters(projected, starter_positions)
     ]
-    ruled_out = sorted(
-        (player_id for player_id, player in by_id.items()
-         if is_ruled_out(player.get("injury_status"))),
-        key=lambda player_id: label(player_id).lower(),
-    )
+    out_now = sorted(ruled_out(projected), key=lambda pid: label(pid).lower())
     posted = sum(1 for player in by_id.values() if player.get("batting_order"))
 
     with st.expander(
         "Who is playing",
-        expanded=bool(announced or ruled_out),
+        expanded=bool(announced or out_now),
     ):
         # The file is true as of when it was exported. This asks the
         # source instead, so a slate can be brought up to date without
@@ -462,7 +462,7 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
             st.caption(
                 f"Read from the salary file: {len(announced)} announced "
                 f"starters, {posted} players in a posted batting order, "
-                f"{len(ruled_out)} ruled out. Adjust anything below."
+                f"{len(out_now)} ruled out. Adjust anything below."
             )
         else:
             st.caption(
@@ -497,19 +497,13 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
                 # So a pitcher is excluded when a team-mate has been
                 # announced and he has not. A team that has announced
                 # nobody keeps all of its pitchers.
+                bans |= sidelined_pitchers(projected, confirmed, starter_positions)
                 decided = {
-                    by_id[player_id].get("team")
-                    for player_id in confirmed
-                    if by_id[player_id].get("team")
-                }
-                bans |= {
-                    player_id for player_id in starters
-                    if player_id not in confirmed
-                    and by_id[player_id].get("team") in decided
+                    str(by_id[player_id].get("team") or "") for player_id in confirmed
                 }
                 undecided = sorted(
-                    {by_id[player_id].get("team") for player_id in starters
-                     if by_id[player_id].get("team")} - decided
+                    {str(by_id[player_id].get("team") or "") for player_id in starters}
+                    - decided - {""}
                 )
                 st.caption(
                     f"{len(confirmed)} confirmed; {len(bans)} other "
@@ -523,12 +517,42 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
                         f"nearer lock to narrow them.]"
                     )
 
+        # The same rule as pitchers, and a more certain one. A team whose
+        # lineup has posted has said who is batting; anyone else on that
+        # team is on the bench, and rostering him is a guaranteed zero.
+        # A team that has not posted keeps everybody, because for a
+        # hitter "not yet listed" usually means "will play" -- unlike a
+        # pitcher, where it means nobody knows which arm it is.
+        posted_teams = teams_with_posted_lineups(projected)
+        benched = sorted(
+            benched_hitters(projected, starter_positions),
+            key=lambda player_id: label(player_id).lower(),
+        )
+
+        if benched:
+            if st.checkbox(
+                f"Drop {len(benched)} hitters left out of posted lineups",
+                value=True,
+                key=f"benched_{slate_id}",
+                help=(
+                    f"{len(posted_teams)} team(s) have posted a lineup. These "
+                    f"players are not in it, so they are on the bench. Teams "
+                    f"that have not posted keep all of their hitters."
+                ),
+            ):
+                bans |= set(benched)
+        elif posted_teams:
+            st.caption(
+                f"{len(posted_teams)} team(s) have posted a lineup and every "
+                f"one of their hitters in this pool is in it."
+            )
+
         others = sorted(by_id, key=lambda player_id: label(player_id).lower())
 
         out = st.multiselect(
             "Out, injured, or benched",
             others,
-            default=ruled_out,
+            default=out_now,
             format_func=label,
             key=f"out_{slate_id}",
             help=(
@@ -983,6 +1007,27 @@ def _show_getting_started(config) -> None:
         )
 
 
+def _availability_mark(player: dict) -> str:
+    """One glyph for whether a player is in today's game.
+
+    A batting slot is the strongest thing a pool row can say -- the
+    lineup is posted and he is in it. A pitcher code means announced.
+    Blank means not yet known, which is not the same as out.
+    """
+
+    if is_ruled_out(player.get("injury_status")):
+        return "OUT"
+
+    order = player.get("batting_order")
+    if order:
+        return f"#{int(order)}"
+
+    if player.get("starting"):
+        return str(player["starting"])
+
+    return player.get("injury_status") or ""
+
+
 def _show_pool(pool: list[dict], config) -> None:
     playable = [player for player in pool if player.get("projected_points", 0) > 0]
 
@@ -999,6 +1044,11 @@ def _show_pool(pool: list[dict], config) -> None:
                 "Pos": "/".join(player.get("positions") or []),
                 "Team": player.get("team"),
                 "Opp": player.get("opponent"),
+                # What the site says about today, not about the season:
+                # a batting slot, a starting-pitcher code, or nothing
+                # yet. Worth a column because a player who will not
+                # appear scores zero however good his projection is.
+                "In": _availability_mark(player),
                 "Salary": player.get("salary"),
                 "Proj": player.get("projected_points"),
                 "Floor": player.get("floor"),

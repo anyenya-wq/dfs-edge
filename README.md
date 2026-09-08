@@ -168,9 +168,26 @@ be overridden:
 - **Confirmed starters at P/SP/RP** (goalies in hockey) — a whitelist.
   Name the dozen who start and every other pitcher leaves the pool.
   Naming who plays is far less work than excluding who does not.
+- **Drop hitters left out of posted lineups** — the strongest signal
+  there is. A team that has posted its lineup has said who is batting;
+  anyone else on that team is on the bench and worth zero. A team that
+  has *not* posted keeps every hitter.
 - **Out, injured, or benched** — anyone ruled out after the file was
   published.
 - **Always roster** — forced into every lineup.
+
+The three rules are deliberately not symmetric, and `dfs/availability.py`
+is where that reasoning lives. A pitcher's team-mate being announced
+settles the whole staff, because one starts and the rest do not appear.
+A hitter is only settled by his own team posting: "not yet listed"
+usually means "will play" for a hitter and "nobody knows which arm yet"
+for a pitcher. Treating every gap as an absence would delete most of a
+slate for most of the afternoon; treating none of them as one rosters
+players who are confirmed to be sitting.
+
+The **In** column in the player pool shows what the site says about
+each player today — a batting slot (`#3`), a pitcher code (`SP`), `OUT`,
+or blank for not yet known.
 
 `IL` and `OUT` are treated as absences; `DTD` is not. A doubt is not an
 absence, and removing a probable starter can leave no legal lineup at
