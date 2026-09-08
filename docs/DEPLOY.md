@@ -84,6 +84,19 @@ taking every locked slate and recorded result with it -- and nothing
 errors when that happens, so the sidebar names the backend in use on
 every page.
 
+## Idle databases
+
+A serverless PostgreSQL -- Neon among them -- suspends its compute after
+a few idle minutes, and every open connection dies with it. The app
+holds one connection for as long as its container lives, so this is not
+an edge case: it is what happens whenever you come back to the tab after
+a break.
+
+The connection reopens itself when the driver reports it closed. Checked
+before the statement rather than caught after it, because a connection
+already marked closed has sent nothing -- reopening cannot replay a
+write. A statement that fails for its own reasons still raises.
+
 ## The nightly scoring job
 
 Separate from the app. `.github/workflows/resolve.yml` scores locked

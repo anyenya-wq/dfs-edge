@@ -173,3 +173,115 @@ def test_a_generated_id_comes_back_from_an_insert(database):
     first = database.save_lineup(slate_id, {"players": [], "total_salary": 1})
     second = database.save_lineup(slate_id, {"players": [], "total_salary": 2})
     assert second > first
+
+
+# ----------------------------------------------------------------------
+# Surviving a connection the server closed underneath us
+# ----------------------------------------------------------------------
+
+
+class _Flaky:
+    """A driver connection that dies once, the way a suspended one does."""
+
+    def __init__(self):
+        self.closed = False
+        self.statements: list[str] = []
+        self.commits = 0
+
+    def die(self):
+        self.closed = True
+
+    def execute(self, statement, params=()):
+        if self.closed:
+            raise RuntimeError("the connection is closed")
+        self.statements.append(statement)
+        return ["row"]
+
+    def executemany(self, statement, rows):
+        if self.closed:
+            raise RuntimeError("the connection is closed")
+        self.statements.extend([statement] * len(list(rows)))
+
+    def commit(self):
+        self.commits += 1
+
+    def close(self):
+        self.closed = True
+
+
+def _reconnecting():
+    """A Connection whose reopen hands back a fresh, live driver."""
+
+    from dfs.db.dialect import SQLITE
+
+    made = []
+
+    def reopen():
+        fresh = _Flaky()
+        made.append(fresh)
+        return fresh
+
+    connection = Connection(_Flaky(), SQLITE, reopen=reopen)
+    return connection, made
+
+
+def test_a_dead_connection_is_reopened_before_the_next_statement():
+    """The failure a hosted database produces after a few idle minutes.
+
+    Neon and its like suspend an idle database and every open connection
+    dies. The app holds one across reruns, so without this the first
+    interaction afterwards fails -- and so does every one after it,
+    because the dead connection is the cached one.
+    """
+
+    connection, made = _reconnecting()
+    connection.raw.die()
+
+    assert connection.execute("SELECT 1") == ["row"]
+    assert len(made) == 1
+
+
+def test_a_write_survives_the_same_death_without_repeating_itself():
+    connection, made = _reconnecting()
+    connection.raw.die()
+
+    connection.executemany("INSERT INTO t VALUES (?)", [(1,), (2,), (3,)])
+
+    # Three rows on the new connection, and none replayed onto the old.
+    assert len(made[0].statements) == 3
+
+
+def test_a_statement_that_fails_on_a_live_connection_still_raises():
+    """Only a dead connection is retried. A broken query must surface."""
+
+    from dfs.db.dialect import SQLITE
+
+    class Broken(_Flaky):
+        def execute(self, statement, params=()):
+            raise RuntimeError("syntax error at or near \"slect\"")
+
+    connection = Connection(Broken(), SQLITE, reopen=lambda: _Flaky())
+
+    with pytest.raises(RuntimeError, match="syntax error"):
+        connection.execute("slect 1")
+
+
+def test_a_connection_with_no_way_to_reopen_raises_as_before():
+    """SQLite has no reopen, and a file that vanished is a real error."""
+
+    from dfs.db.dialect import SQLITE
+
+    connection = Connection(_Flaky(), SQLITE)
+    connection.raw.die()
+
+    with pytest.raises(RuntimeError, match="connection is closed"):
+        connection.execute("SELECT 1")
+
+
+def test_committing_a_reopened_connection_is_not_an_error():
+    from dfs.db.dialect import SQLITE
+
+    connection = Connection(_Flaky(), SQLITE, reopen=lambda: _Flaky())
+    connection.raw.die()
+
+    connection.commit()  # must not raise

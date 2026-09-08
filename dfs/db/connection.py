@@ -80,16 +80,66 @@ class Connection:
     fact, PostgreSQL requires asking for it in the statement.
     """
 
-    def __init__(self, raw: Any, dialect: Dialect) -> None:
+    def __init__(self, raw: Any, dialect: Dialect, reopen=None) -> None:
         self.raw = raw
         self.dialect = dialect
+        # How to obtain a fresh driver connection. Held because a hosted
+        # PostgreSQL connection does not last: Neon and its like suspend
+        # an idle database and every open connection dies with it, and
+        # the app holds one across reruns for as long as the container
+        # lives. Without this, the first interaction after a few idle
+        # minutes fails, and so does every one after it -- the dead
+        # connection is cached, so the app never recovers on its own.
+        self._reopen = reopen
         # Writes are serialised by the storage layer's lock; this guards
         # the cursor churn that psycopg needs for executemany.
         self._lock = threading.RLock()
 
+    @property
+    def closed(self) -> bool:
+        """Whether the driver already knows the connection is unusable."""
+
+        return bool(getattr(self.raw, "closed", False))
+
+    def _ensure_open(self) -> None:
+        """Reopen before use if the connection is known to be dead.
+
+        Checked rather than caught, because a connection the driver has
+        already marked closed has sent nothing: reopening here cannot
+        replay a statement, which makes it safe for writes as well as
+        reads.
+        """
+
+        if self._reopen is not None and self.closed:
+            self.raw = self._reopen()
+
+    def _retry_after_reconnect(self, error: Exception) -> bool:
+        """Whether `error` is a dead connection worth reopening for.
+
+        Narrow on purpose. A statement that failed for its own reasons
+        must surface, and a write that may have reached the server must
+        not be sent twice -- so this asks the driver whether the
+        connection itself is gone rather than reading the message.
+        """
+
+        if self._reopen is None or not self.closed:
+            return False
+
+        self.raw = self._reopen()
+        return True
+
     def execute(self, sql: str, params: Sequence[Any] | Mapping[str, Any] = ()):
         statement = translate(sql, self.dialect)
+        self._ensure_open()
 
+        try:
+            return self._execute(statement, params)
+        except Exception as error:
+            if not self._retry_after_reconnect(error):
+                raise
+            return self._execute(statement, params)
+
+    def _execute(self, statement: str, params):
         if self.dialect.name == "sqlite":
             return self.raw.execute(statement, params)
 
@@ -99,14 +149,26 @@ class Connection:
 
     def executemany(self, sql: str, rows: Iterable[Sequence[Any]]) -> None:
         statement = translate(sql, self.dialect)
+        # Materialised because a retry has to send the same rows again,
+        # and a generator would already be spent.
+        batch = [tuple(row) for row in rows]
+        self._ensure_open()
 
+        try:
+            self._executemany(statement, batch)
+        except Exception as error:
+            if not self._retry_after_reconnect(error):
+                raise
+            self._executemany(statement, batch)
+
+    def _executemany(self, statement: str, batch) -> None:
         if self.dialect.name == "sqlite":
-            self.raw.executemany(statement, rows)
+            self.raw.executemany(statement, batch)
             return
 
         with self._lock:
             cursor = self.raw.cursor()
-            cursor.executemany(statement, [tuple(row) for row in rows])
+            cursor.executemany(statement, batch)
 
     def insert_returning_id(self, sql: str, params: Sequence[Any]) -> int:
         """Insert one row and return its generated id."""
@@ -119,6 +181,11 @@ class Connection:
         return int(cursor.fetchone()[0])
 
     def commit(self) -> None:
+        # A commit on a connection that has just been reopened has
+        # nothing to commit, and raising here would turn a recovered
+        # read into an error.
+        if self.closed:
+            return
         self.raw.commit()
 
     def close(self) -> None:
@@ -150,8 +217,12 @@ def connect(url: str | Path) -> Connection:
                 "the driver alone."
             ) from error
 
-        raw = psycopg.connect(target, row_factory=_postgres_row_factory, autocommit=False)
-        return Connection(raw, POSTGRES)
+        def open_postgres():
+            return psycopg.connect(
+                target, row_factory=_postgres_row_factory, autocommit=False
+            )
+
+        return Connection(open_postgres(), POSTGRES, reopen=open_postgres)
 
     if target.startswith("sqlite://"):
         parsed = urlparse(target)
