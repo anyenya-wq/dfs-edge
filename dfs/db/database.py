@@ -472,6 +472,46 @@ class Database:
 
         return dict(row) if row else None
 
+    def set_slate_date(self, slate_id: int, slate_date: str) -> None:
+        """Move a slate to the date its games are actually played.
+
+        Needed because one of the two exports does not carry a date.
+        FanDuel's file says nothing about when the games are, so the
+        date has to be supplied, and a wrong one is not cosmetic:
+        results are matched to a slate by date, so a slate dated a day
+        its games were not played can never be scored. It would sit on
+        the calibration record for ever, unresolvable.
+
+        Refuses rather than merges when another slate already occupies
+        the target, since silently folding two pools together would
+        destroy one of them.
+        """
+
+        current = self.slate(slate_id)
+
+        if current is None:
+            raise ValueError(f"No slate with id {slate_id}.")
+
+        if current["slate_date"] == slate_date:
+            return
+
+        clash = self.find_slate(
+            current["sport"], current["site"], slate_date, current["name"]
+        )
+
+        if clash is not None and clash != slate_id:
+            raise ValueError(
+                f"A {current['sport']}:{current['site']} slate already exists "
+                f"for {slate_date}. Delete or re-upload that one instead."
+            )
+
+        with self._lock:
+            self.connection.execute(
+                "UPDATE slates SET slate_date = ? WHERE id = ?",
+                (slate_date, slate_id),
+            )
+            self.connection.commit()
+
     def slates_with_players(self, limit: int = 60) -> list[dict[str, Any]]:
         """Stored slates that actually have a pool, newest first.
 

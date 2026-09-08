@@ -191,6 +191,7 @@ def _ingest_uploads(database, uploads, fallback_date: str) -> None:
         # FanDuel's export carries no date, so the sidebar's date stands
         # in. DraftKings writes one into every row and it is used.
         date = found.slate_date or fallback_date
+        assumed = found.slate_date is None
 
         try:
             slate_id, config, pool = load_slate(
@@ -205,10 +206,26 @@ def _ingest_uploads(database, uploads, fallback_date: str) -> None:
             "label": f"{found.sport}:{found.site} {date}",
             "players": len(pool),
             "name": upload.name,
+            "assumed": assumed,
+            "date": date,
         })
 
     for entry in stored:
         st.success(f"{entry['label']} — {entry['players']} players", icon="✅")
+
+    # A date nobody chose is the one thing here worth interrupting for.
+    # Results are matched to a slate by date, so a slate dated a day its
+    # games were not played can never be scored -- it sits on the
+    # calibration record for ever, unresolvable, and nothing errors.
+    for entry in stored:
+        if entry["assumed"]:
+            st.warning(
+                f"**{entry['name']}** carries no date, so it was filed under "
+                f"**{entry['date']}**. If those games are on another day, fix "
+                f"it with *Games are played on* below — a slate dated wrongly "
+                f"can never be scored.",
+                icon="📅",
+            )
 
     for name, reason in skipped:
         st.warning(f"{name}: {reason}", icon="⚠️")
@@ -257,6 +274,46 @@ def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | Non
     )
 
     return choice
+
+
+def _slate_date_control(database, stored) -> str:
+    """Show the slate's date, and let it be corrected.
+
+    Worth a control rather than a caption because one of the two sites
+    does not put a date in its export. FanDuel's file says nothing about
+    when the games are, so the date is supplied rather than read -- and
+    a wrong one is not cosmetic. Results are matched to a slate by date,
+    so a slate filed under a day its games were not played can never be
+    scored: it sits on the calibration record for ever, unresolvable,
+    and nothing errors to say so.
+    """
+
+    current = dt.date.fromisoformat(stored["slate_date"])
+
+    chosen = st.date_input(
+        "Games are played on",
+        current,
+        key=f"slate_date_{stored['id']}",
+        help=(
+            "DraftKings writes the date into its export and it is read from "
+            "there. FanDuel's carries none, so it was filed under whatever "
+            "date was selected when you uploaded it. Correct it here if the "
+            "games are on another day."
+        ),
+    )
+
+    if chosen.isoformat() == stored["slate_date"]:
+        return stored["slate_date"]
+
+    try:
+        database.set_slate_date(stored["id"], chosen.isoformat())
+    except ValueError as error:
+        st.error(str(error))
+        return stored["slate_date"]
+
+    stored["slate_date"] = chosen.isoformat()
+    st.success(f"Moved to {chosen.isoformat()}.", icon="📅")
+    return stored["slate_date"]
 
 
 def main() -> None:
@@ -395,7 +452,8 @@ def main() -> None:
         return
 
     stored = database.slate(slate_id)
-    sport, site, slate_date = stored["sport"], stored["site"], stored["slate_date"]
+    slate_date = _slate_date_control(database, stored)
+    sport, site = stored["sport"], stored["site"]
     config = get_config(sport, site)
     pool = database.player_pool(slate_id)
 

@@ -388,3 +388,67 @@ def test_more_players_than_fit_in_one_statement(database):
     assert len(logs) == len(ids)
     assert all(len(logs[player_id]) == 1 for player_id in ids[:3])
     assert logs[ids[400]] == []
+
+
+def test_a_slate_can_be_moved_to_the_date_its_games_are_played(database):
+    """FanDuel's export carries no date, so one has to be supplied.
+
+    A wrong one is not cosmetic. Results are matched to a slate by date,
+    so a slate filed under a day its games were not played can never be
+    scored -- it sits on the calibration record for ever, and nothing
+    errors to say so.
+    """
+
+    slate = database.upsert_slate("NFL", "FD", "2026-09-08")
+    database.save_salaries(slate, _players("nfl:", 3, sport="NFL"))
+
+    database.set_slate_date(slate, "2026-09-13")
+
+    assert database.slate(slate)["slate_date"] == "2026-09-13"
+    # The pool moves with it rather than being orphaned.
+    assert len(database.player_pool(slate)) == 3
+
+
+def test_moving_a_slate_onto_an_occupied_date_is_refused(database):
+    """Merging two pools silently would destroy one of them."""
+
+    monday = database.upsert_slate("NFL", "FD", "2026-09-08")
+    sunday = database.upsert_slate("NFL", "FD", "2026-09-13")
+    database.save_salaries(sunday, _players("nfl:", 2, sport="NFL"))
+
+    with pytest.raises(ValueError, match="already exists"):
+        database.set_slate_date(monday, "2026-09-13")
+
+    assert database.slate(monday)["slate_date"] == "2026-09-08"
+    assert len(database.player_pool(sunday)) == 2
+
+
+def test_moving_a_slate_to_the_date_it_already_has_does_nothing(database):
+    slate = database.upsert_slate("NFL", "FD", "2026-09-13")
+
+    database.set_slate_date(slate, "2026-09-13")
+
+    assert database.slate(slate)["slate_date"] == "2026-09-13"
+
+
+def test_moving_a_slate_that_does_not_exist_is_an_error(database):
+    with pytest.raises(ValueError, match="No slate"):
+        database.set_slate_date(9_999, "2026-09-13")
+
+
+def test_a_moved_slate_keeps_its_projections(database):
+    """The point of moving rather than re-uploading."""
+
+    slate = database.upsert_slate("NFL", "FD", "2026-09-08")
+    database.save_salaries(slate, _players("nfl:", 2, sport="NFL"))
+    database.save_projections(slate, [
+        {"player_id": "nfl:0", "projected_points": 14.0},
+        {"player_id": "nfl:1", "projected_points": 11.0},
+    ])
+
+    database.set_slate_date(slate, "2026-09-13")
+
+    rows = database.connection.execute(
+        "SELECT COUNT(*) AS n FROM projections WHERE slate_id = ?", (slate,)
+    ).fetchone()
+    assert int(rows["n"]) == 2

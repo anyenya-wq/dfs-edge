@@ -128,8 +128,22 @@ rather than assigned to the closest thing. An NBA export read as NFL
 parses perfectly and yields an empty build that looks like a solver
 problem, which is a far more expensive answer than "I could not tell".
 
-Everything uploaded stays available in the **Slate** picker. Switching
-between them reads from storage and re-uploads nothing.
+Everything uploaded stays available in the **Slate** picker, newest
+date first. It accumulates: tomorrow's uploads join today's rather than
+replacing them, and switching between them reads from storage and
+re-uploads nothing. Re-uploading the same sport, site and date replaces
+that one pool; anything else is added alongside.
+
+### Dates, and why they matter
+
+DraftKings writes the date into every row of its export and it is read
+from there. FanDuel's carries none, so the slate is filed under whatever
+date was selected at upload -- and the app says so, naming the file.
+
+Correct it with **Games are played on** above the tabs. This is not
+cosmetic: results are matched to a slate by date, so a slate filed under
+a day its games were not played can never be scored. It would sit on the
+calibration record for ever, unresolvable, with nothing to say why.
 
 ## Starting over
 
