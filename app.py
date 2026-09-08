@@ -13,6 +13,7 @@ Run with:  streamlit run app.py
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import os
 from pathlib import Path
 
@@ -41,6 +42,80 @@ from dfs.sports import SITES, SPORTS, VERIFICATION_NOTES, get_config
 st.set_page_config(page_title="DFS Edge", page_icon="🎯", layout="wide")
 
 
+def _secret(name: str) -> str | None:
+    """A setting from Streamlit's secrets, falling back to the environment.
+
+    Hosted deployments keep these in Streamlit's own store rather than
+    the process environment, and the accessor raises rather than
+    returning empty when no secrets file exists at all -- which is the
+    normal local case.
+    """
+
+    try:
+        if name in st.secrets:
+            return str(st.secrets[name])
+    except Exception:
+        pass
+
+    return os.environ.get(name)
+
+
+def require_password() -> bool:
+    """Gate the app behind a shared password, when one is configured.
+
+    Streamlit Community Cloud serves free apps at a public URL. This
+    board reads and writes a real database: a locked slate is a forecast
+    on the record, and anyone who could open the page could add to it,
+    resolve it, or read what has been forecast. If `ANTHROPIC_API_KEY`
+    is also set, an open page is an open tab on that account.
+
+    So the page renders nothing until the password matches. Returns
+    False when it has not, and the caller renders nothing else.
+
+    No password configured means no gate -- that is the local case,
+    where the app is reachable only from the machine running it. The
+    trade-off is deliberate: requiring one locally would add a step to
+    every run for no gain, and forgetting to set one in a deployment is
+    caught by the banner below rather than by silence.
+    """
+
+    expected = _secret("APP_PASSWORD")
+
+    if not expected:
+        # Said out loud rather than assumed. A deployment that meant to
+        # set a password and did not is indistinguishable from a local
+        # run unless something says so.
+        if _secret("DFS_DATABASE_URL"):
+            st.warning(
+                "No `APP_PASSWORD` is set, so this page is open to anyone "
+                "with the link. Set one in the app's Secrets."
+            )
+        return True
+
+    if st.session_state.get("authenticated"):
+        return True
+
+    st.title("DFS Edge")
+    st.caption("This board is private. Enter the password to continue.")
+
+    with st.form("password"):
+        attempt = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Enter")
+
+    if submitted:
+        # Constant-time: a plain `==` leaks the length of the matching
+        # prefix through how long it takes to fail.
+        if hmac.compare_digest(attempt, expected):
+            st.session_state["authenticated"] = True
+            # Not kept anywhere. The session flag is what persists, and
+            # it lives only in this browser session.
+            st.rerun()
+        else:
+            st.error("Incorrect password.")
+
+    return False
+
+
 def database_url() -> str | None:
     """Where to store, checking Streamlit's secrets before the environment.
 
@@ -53,15 +128,7 @@ def database_url() -> str | None:
     just never accumulate.
     """
 
-    try:
-        if "DFS_DATABASE_URL" in st.secrets:
-            return str(st.secrets["DFS_DATABASE_URL"])
-    except Exception:
-        # No secrets file at all is the normal local case, and the
-        # accessor raises rather than returning empty.
-        pass
-
-    return os.environ.get("DFS_DATABASE_URL")
+    return _secret("DFS_DATABASE_URL")
 
 
 def _code_version() -> float:
@@ -91,6 +158,11 @@ def get_database(url: str, code_version: float) -> Database:
 
 
 def main() -> None:
+    # Before anything else: no database is opened, no history is
+    # collected, and no key is used until the password matches.
+    if not require_password():
+        return
+
     st.title("DFS Edge")
     st.caption(
         "Multi-sport daily fantasy research. Projections, ownership leverage, "

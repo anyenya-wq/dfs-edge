@@ -115,6 +115,17 @@ also called `app.py`. Running `streamlit run app.py` from the root
 starts that one instead, with no error to say so; it just looks like
 DFS Edge stopped updating.
 
+## Hosting
+
+`docs/DEPLOY.md` covers putting the board on Streamlit Community Cloud:
+always on, one URL, nothing to start. The app is stateless -- the record
+lives in PostgreSQL -- so hosting it is a redeploy rather than a
+migration.
+
+A public deployment gates itself behind `APP_PASSWORD`. Without that
+set, a deployment says so in a banner rather than quietly serving your
+forecasts to anyone with the link.
+
 ## Where the data lives
 
 SQLite by default: no server, nothing to configure, and the file sits at
