@@ -153,7 +153,17 @@ is the whole game: forty pitchers are listed and about a dozen start. A
 relief pitcher projects on his rate per inning and will win the
 optimizer outright, on innings he is never going to throw.
 
-**Who is playing**, above the tabs, is where that knowledge is entered:
+**DraftKings publishes the answer in the file itself.** Its export
+carries a `Starting` column — a batting order once a lineup is posted, a
+code on a pitcher once he is announced — and a `Status` column marking
+the injured list. Those are read on upload, so a file exported near lock
+arrives already knowing who is starting.
+
+On a real September slate: 21 announced pitchers, 99 hitters in posted
+batting orders, 203 players on the injured list, from one upload.
+
+**Who is playing**, above the tabs, shows what the file said and lets it
+be overridden:
 
 - **Confirmed starters at P/SP/RP** (goalies in hockey) — a whitelist.
   Name the dozen who start and every other pitcher leaves the pool.
@@ -162,9 +172,12 @@ optimizer outright, on innings he is never going to throw.
   published.
 - **Always roster** — forced into every lineup.
 
-Nothing here is guessed. Starters are announced on the site's own draft
-screen an hour or two before lock, and entering them is worth more than
-any refinement to the model behind them.
+`IL` and `OUT` are treated as absences; `DTD` is not. A doubt is not an
+absence, and removing a probable starter can leave no legal lineup at
+all — a worse error than carrying a small risk.
+
+FanDuel's export has an injury indicator, which is read, but no batting
+order, so its starters are still named by hand.
 
 ## Starting over
 

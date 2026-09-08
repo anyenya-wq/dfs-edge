@@ -66,9 +66,52 @@ class Database:
         self._lock = threading.RLock()
         self.create_tables()
 
+        for table, columns in self.ADDED_COLUMNS.items():
+            self._add_missing_columns(table, columns)
+
     # ------------------------------------------------------------------
     # Schema
     # ------------------------------------------------------------------
+
+    # Columns added after the first databases were created. A deployed
+    # database holds the collected history and every stored slate, so it
+    # is migrated rather than recreated.
+    ADDED_COLUMNS = {
+        "salaries": {"starting": "TEXT", "batting_order": "INTEGER"},
+    }
+
+    def _columns(self, table: str) -> set[str]:
+        """The columns a table actually has right now."""
+
+        if self.dialect.name == "postgres":
+            rows = self.connection.execute(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = ?",
+                (table,),
+            ).fetchall()
+            return {str(row["column_name"]) for row in rows}
+
+        rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+        return {str(row["name"]) for row in rows}
+
+    def _add_missing_columns(self, table: str, columns: Mapping[str, str]) -> None:
+        """Add columns a table is missing, leaving existing data alone.
+
+        `CREATE TABLE IF NOT EXISTS` does nothing to a table that already
+        exists, so a new column never reaches a database created before
+        it. That is not hypothetical: the deployed database holds the
+        collected history and every stored slate, and dropping it to
+        pick up a column would throw away the record this whole project
+        exists to build.
+        """
+
+        existing = self._columns(table)
+
+        with self._lock:
+            for name, definition in columns.items():
+                if name in existing:
+                    continue
+                self.connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+            self.connection.commit()
 
     def _create(self, sql: str) -> None:
         """Run one schema statement, spelled for whichever backend is open."""
@@ -134,6 +177,12 @@ class Database:
                     game_id TEXT,
                     site_avg_points REAL,
                     injury_status TEXT,
+                    -- What the site itself says about availability. The
+                    -- export carries a batting order once a lineup is
+                    -- posted, and a code on a pitcher once he is
+                    -- announced; both are blank until then.
+                    starting TEXT,
+                    batting_order INTEGER,
                     UNIQUE (slate_id, player_id),
                     FOREIGN KEY (slate_id) REFERENCES slates(id),
                     FOREIGN KEY (player_id) REFERENCES players(player_id)
@@ -377,9 +426,10 @@ class Database:
                     """
                     INSERT INTO salaries (
                         slate_id, player_id, salary, roster_positions,
-                        team, opponent, home, game_id, site_avg_points, injury_status
+                        team, opponent, home, game_id, site_avg_points,
+                        injury_status, starting, batting_order
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (slate_id, player_id) DO UPDATE SET
                         salary = excluded.salary,
                         roster_positions = excluded.roster_positions,
@@ -388,7 +438,9 @@ class Database:
                         home = excluded.home,
                         game_id = excluded.game_id,
                         site_avg_points = excluded.site_avg_points,
-                        injury_status = excluded.injury_status
+                        injury_status = excluded.injury_status,
+                        starting = excluded.starting,
+                        batting_order = excluded.batting_order
                     """,
                     (
                         slate_id,
@@ -401,6 +453,8 @@ class Database:
                         row.get("game_id"),
                         row.get("site_avg_points"),
                         row.get("injury_status"),
+                        row.get("starting"),
+                        row.get("batting_order"),
                     ),
                 )
                 count += 1
@@ -543,6 +597,7 @@ class Database:
             SELECT
                 s.player_id, s.salary, s.roster_positions, s.team, s.opponent,
                 s.home, s.game_id, s.site_avg_points, s.injury_status,
+                s.starting, s.batting_order,
                 p.name, p.positions,
                 -- The site's own player ids. Needed to export a lineup
                 -- back for bulk upload: both sites match on their id,

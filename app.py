@@ -23,6 +23,7 @@ import streamlit as st
 from dfs.db.connection import is_postgres_url
 from dfs.db.database import Database
 from dfs.ingest.detect import detect
+from dfs.ingest.salaries import is_ruled_out
 from dfs.export import (
     ExportError, readable_filename, to_readable_csv, to_upload_csv, upload_filename,
 )
@@ -354,12 +355,43 @@ def _availability_controls(projected, config, slate_id: int):
     locks: set[str] = set()
     bans: set[str] = set()
 
-    with st.expander("Who is playing", expanded=False):
+    # What the site itself says. DraftKings publishes a batting order
+    # once a lineup is posted and a code on a pitcher once he is
+    # announced, in the same export already uploaded -- so the answer is
+    # in the file rather than something to be typed in.
+    announced = [
+        player_id for player_id in starters
+        if by_id[player_id].get("starting") and not by_id[player_id].get("batting_order")
+    ]
+    ruled_out = sorted(
+        (player_id for player_id, player in by_id.items()
+         if is_ruled_out(player.get("injury_status"))),
+        key=lambda player_id: label(player_id).lower(),
+    )
+    posted = sum(1 for player in by_id.values() if player.get("batting_order"))
+
+    with st.expander(
+        "Who is playing",
+        expanded=bool(announced or ruled_out),
+    ):
+        if announced or ruled_out or posted:
+            st.caption(
+                f"Read from the salary file: {len(announced)} announced "
+                f"starters, {posted} players in a posted batting order, "
+                f"{len(ruled_out)} ruled out. Adjust anything below."
+            )
+        else:
+            st.caption(
+                "This file names no starters yet. Export it again closer to "
+                "lock and they will be filled in here."
+            )
+
         if starters:
             names = "/".join(sorted(starter_positions))
             confirmed = st.multiselect(
                 f"Confirmed starters at {names}",
                 starters,
+                default=announced,
                 format_func=label,
                 key=f"starters_{slate_id}",
                 help=(
@@ -384,9 +416,14 @@ def _availability_controls(projected, config, slate_id: int):
         out = st.multiselect(
             "Out, injured, or benched",
             others,
+            default=ruled_out,
             format_func=label,
             key=f"out_{slate_id}",
-            help="Anyone ruled out after the salary file was published.",
+            help=(
+                "Pre-filled from the file's own status column -- IL and OUT, "
+                "not day-to-day, since a doubt is not an absence. Add anyone "
+                "ruled out since."
+            ),
         )
         bans |= set(out)
 

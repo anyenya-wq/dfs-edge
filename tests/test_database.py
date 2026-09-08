@@ -452,3 +452,56 @@ def test_a_moved_slate_keeps_its_projections(database):
         "SELECT COUNT(*) AS n FROM projections WHERE slate_id = ?", (slate,)
     ).fetchone()
     assert int(rows["n"]) == 2
+
+
+def test_a_database_created_before_a_column_existed_gains_it(database):
+    """A deployed database holds the collected history and every stored
+    slate. Recreating it to pick up a column would throw away the record
+    this project exists to build, so it is migrated instead.
+    """
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, _players("mlb:", 2, sport="MLB"))
+
+    # Drop back to the older shape, then re-run the migration.
+    for column in ("starting", "batting_order"):
+        database.connection.execute(f"ALTER TABLE salaries DROP COLUMN {column}")
+    database.connection.commit()
+    assert "starting" not in database._columns("salaries")
+
+    database._add_missing_columns("salaries", Database.ADDED_COLUMNS["salaries"])
+
+    assert {"starting", "batting_order"} <= database._columns("salaries")
+    # And the rows that were there are still there.
+    assert len(database.player_pool(slate)) == 2
+
+
+def test_migrating_twice_changes_nothing(database):
+    before = database._columns("salaries")
+
+    database._add_missing_columns("salaries", Database.ADDED_COLUMNS["salaries"])
+    database._add_missing_columns("salaries", Database.ADDED_COLUMNS["salaries"])
+
+    assert database._columns("salaries") == before
+
+
+def test_the_pool_returns_what_the_site_said_about_availability(database):
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, [
+        {
+            "player_id": "mlb:sp", "name": "Announced", "sport": "MLB",
+            "positions": ["SP"], "roster_positions": ["P"], "salary": 11_000,
+            "starting": "SP", "batting_order": None, "injury_status": None,
+        },
+        {
+            "player_id": "mlb:bat", "name": "Leads Off", "sport": "MLB",
+            "positions": ["OF"], "roster_positions": ["OF"], "salary": 5_000,
+            "starting": "1", "batting_order": 1, "injury_status": None,
+        },
+    ])
+
+    by_name = {row["name"]: row for row in database.player_pool(slate)}
+
+    assert by_name["Announced"]["starting"] == "SP"
+    assert by_name["Announced"]["batting_order"] is None
+    assert by_name["Leads Off"]["batting_order"] == 1

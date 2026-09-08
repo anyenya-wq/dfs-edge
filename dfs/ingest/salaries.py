@@ -79,6 +79,49 @@ def pool_player_id(name: str, sport: str, positions, team: str | None) -> str:
     return player_id(name, sport)
 
 
+# Site codes meaning "out", as opposed to a doubtful player who may
+# still appear. DraftKings writes these in a Status column; FanDuel in
+# an Injury Indicator.
+RULED_OUT = frozenset({"IL", "OUT", "O", "NA", "SUSP"})
+
+
+def is_ruled_out(status: str | None) -> bool:
+    """Whether a status means the player will not appear at all.
+
+    Deliberately narrow. `DTD` and `Q` are doubts, not absences, and
+    treating a doubt as an absence would silently remove a player who
+    is very likely to start -- which on a short slate can be the
+    difference between a lineup and no lineup.
+    """
+
+    return str(status or "").strip().upper() in RULED_OUT
+
+
+def parse_starting(raw: str | None) -> tuple[str | None, int | None]:
+    """What the site says about a player being in today's lineup.
+
+    Two different things share one column, because they are the same
+    fact for two kinds of player. A hitter gets his batting order once
+    the lineup is posted -- `1` through `9`. A pitcher gets a code once
+    he is announced. Blank means neither has happened yet, which is not
+    the same as being out.
+
+    Returns (raw code, batting order or None).
+    """
+
+    value = str(raw or "").strip().upper()
+
+    if not value:
+        return None, None
+
+    if value.isdigit():
+        order = int(value)
+        # A batting order outside 1-9 is not a batting order.
+        return (value, order) if 1 <= order <= 9 else (value, None)
+
+    return value, None
+
+
 def _split_positions(raw: str | None) -> list[str]:
     if not raw:
         return []
@@ -157,6 +200,7 @@ def parse_draftkings(source: str | Iterable[str], sport: str) -> list[dict[str, 
         game = _parse_game_info(row.get("Game Info") or row.get("Game"), team)
         positions = _split_positions(row.get("Position"))
         roster_positions = _split_positions(row.get("Roster Position")) or positions
+        starting, batting_order = parse_starting(row.get("Starting"))
 
         pool.append(
             {
@@ -169,7 +213,9 @@ def parse_draftkings(source: str | Iterable[str], sport: str) -> list[dict[str, 
                 "salary": int(float(salary)),
                 "dk_id": row.get("ID") or None,
                 "site_avg_points": _as_float(row.get("AvgPointsPerGame")),
-                "injury_status": None,
+                "injury_status": (row.get("Status") or "").strip().upper() or None,
+                "starting": starting,
+                "batting_order": batting_order,
                 **game,
             }
         )
