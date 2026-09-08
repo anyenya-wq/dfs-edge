@@ -289,8 +289,6 @@ def main() -> None:
         # to know before it starts going there.
         _show_storage(url)
 
-        _ensure_history(database, sport)
-
         st.divider()
         st.header("Salaries")
         uploads = st.file_uploader(
@@ -308,6 +306,9 @@ def main() -> None:
 
         if uploads:
             _ingest_uploads(database, uploads, slate_date)
+
+        st.divider()
+        _ensure_history(database, sport)
 
         st.divider()
         st.header("Build")
@@ -464,6 +465,11 @@ def _history_attempted(sport: str) -> dict:
     return {"done": False}
 
 
+# Sports whose first load walks an API game by game rather than
+# downloading a season as one file.
+SLOW_FIRST_LOAD = {"MLB", "NHL"}
+
+
 def _ensure_history(database: Database, sport: str) -> None:
     """Download or refresh game logs without being asked.
 
@@ -490,15 +496,27 @@ def _ensure_history(database: Database, sport: str) -> None:
     state = _history_attempted(sport)
     if state["done"]:
         return
+
+    if empty and sport.upper() in SLOW_FIRST_LOAD:
+        # Asked rather than assumed, for these two only. The page cannot
+        # be used while it runs, and a first MLB load is minutes -- long
+        # enough that starting it unannounced looks like a crash rather
+        # than like work.
+        st.info(
+            f"{sport} history is not loaded yet. The first download reads "
+            f"games one at a time and takes a few minutes, and the page "
+            f"cannot be used while it runs.",
+            icon="ℹ️",
+        )
+        if not st.button(f"Load {sport} history", use_container_width=True):
+            return
+
     state["done"] = True
 
-    # Baseball is read game by game from an API rather than downloaded
-    # as a file, so its first load takes minutes where the others take
-    # seconds. Saying so beats a spinner that looks stuck.
     # Baseball and hockey are read game by game from an API rather than
     # downloaded as a file, so their first load takes minutes where the
     # others take seconds. Saying so beats a spinner that looks stuck.
-    estimate = "a few minutes" if sport.upper() in {"MLB", "NHL"} else "about 15 seconds"
+    estimate = "a few minutes" if sport.upper() in SLOW_FIRST_LOAD else "about 15 seconds"
     message = (
         f"Downloading {sport} history (one time, {estimate})…"
         if empty
