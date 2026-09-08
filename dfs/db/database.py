@@ -761,6 +761,60 @@ class Database:
             logs.append(record)
         return logs
 
+    # SQLite's default limit on bound parameters is 999, so an IN list
+    # of a whole MLB pool has to be split whatever the server allows.
+    ID_BATCH = 500
+
+    def game_logs_for(
+        self, player_ids, before: str | None = None, limit: int = 40
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Recent logs for many players at once, keyed by player id.
+
+        One query per batch rather than one per player. That distinction
+        does not show up locally -- 942 queries against a file take
+        under a second -- and dominates everything against a hosted
+        database, where each one is a network round trip: a real MLB
+        pool cost 942 of them, twenty to forty seconds of waiting, on
+        every rerun of the script.
+
+        The per-player limit is applied in the database with a window
+        function rather than by fetching everything and slicing, because
+        the point is to move less data, not more.
+        """
+
+        ids = [str(player_id) for player_id in player_ids]
+        logs: dict[str, list[dict[str, Any]]] = {player_id: [] for player_id in ids}
+
+        for start in range(0, len(ids), self.ID_BATCH):
+            batch = ids[start:start + self.ID_BATCH]
+            placeholders = ", ".join("?" for _ in batch)
+            cutoff = "AND game_date < ?" if before else ""
+            parameters = [*batch, *([before] if before else []), limit]
+
+            rows = self.connection.execute(
+                f"""
+                SELECT * FROM (
+                    SELECT g.*, ROW_NUMBER() OVER (
+                        PARTITION BY player_id ORDER BY game_date DESC
+                    ) AS row_number_in_player
+                    FROM game_logs g
+                    WHERE player_id IN ({placeholders}) {cutoff}
+                ) ranked
+                WHERE row_number_in_player <= ?
+                ORDER BY player_id, game_date DESC
+                """,
+                tuple(parameters),
+            ).fetchall()
+
+            for row in rows:
+                record = dict(row)
+                record.pop("row_number_in_player", None)
+                record["stats"] = json.loads(record["stats"] or "{}")
+                record["home"] = bool(record["home"])
+                logs[str(record["player_id"])].append(record)
+
+        return logs
+
     def logs_by_player_prefix(
         self, prefix: str, before: str | None = None, limit: int = 2000
     ) -> list[dict[str, Any]]:
@@ -800,36 +854,58 @@ class Database:
     # ------------------------------------------------------------------
 
     def save_projection(self, slate_id: int, projection: Mapping[str, Any]) -> None:
+        """One projection. `save_projections` writes a whole slate."""
+
+        self.save_projections(slate_id, [projection])
+
+
+    _PROJECTION_SQL = """
+        INSERT INTO projections (
+            slate_id, player_id, projected_points, floor, ceiling, stdev,
+            projected_opportunity, projected_ownership, model
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (slate_id, player_id, model) DO UPDATE SET
+            projected_points = excluded.projected_points,
+            floor = excluded.floor,
+            ceiling = excluded.ceiling,
+            stdev = excluded.stdev,
+            projected_opportunity = excluded.projected_opportunity,
+            projected_ownership = excluded.projected_ownership
+    """
+
+    @staticmethod
+    def _projection_row(slate_id: int, projection: Mapping[str, Any]) -> tuple:
+        return (
+            slate_id,
+            projection["player_id"],
+            float(projection["projected_points"]),
+            projection.get("floor"),
+            projection.get("ceiling"),
+            projection.get("stdev"),
+            projection.get("projected_opportunity"),
+            projection.get("projected_ownership"),
+            projection.get("model", "baseline"),
+        )
+
+    def save_projections(self, slate_id: int, projections) -> int:
+        """Write a whole slate's projections in one statement.
+
+        Saving them one at a time meant a round trip and a commit per
+        player. On a file that is invisible; against a hosted database
+        a full MLB pool spent it 942 times over, on every rerun.
+        """
+
+        rows = [self._projection_row(slate_id, p) for p in projections]
+
+        if not rows:
+            return 0
+
         with self._lock:
-            self.connection.execute(
-                """
-                INSERT INTO projections (
-                    slate_id, player_id, projected_points, floor, ceiling, stdev,
-                    projected_opportunity, projected_ownership, model
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT (slate_id, player_id, model) DO UPDATE SET
-                    projected_points = excluded.projected_points,
-                    floor = excluded.floor,
-                    ceiling = excluded.ceiling,
-                    stdev = excluded.stdev,
-                    projected_opportunity = excluded.projected_opportunity,
-                    projected_ownership = excluded.projected_ownership
-                """,
-                (
-                    slate_id,
-                    projection["player_id"],
-                    float(projection["projected_points"]),
-                    projection.get("floor"),
-                    projection.get("ceiling"),
-                    projection.get("stdev"),
-                    projection.get("projected_opportunity"),
-                    projection.get("projected_ownership"),
-                    projection.get("model", "baseline"),
-                ),
-            )
+            self.connection.executemany(self._ddl(self._PROJECTION_SQL), rows)
             self.connection.commit()
 
+        return len(rows)
 
     def lock_slate(self, slate_id: int) -> int:
         """Stamp every projection for a slate as locked.

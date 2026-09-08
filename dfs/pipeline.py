@@ -138,12 +138,13 @@ def project_slate(
 
     warnings: list[str] = []
 
-    logs_by_player = {
-        str(player["player_id"]): database.game_logs(
-            str(player["player_id"]), before=slate_date
-        )
-        for player in pool
-    }
+    # Fetched in batches, not one player at a time. Against a hosted
+    # database the per-player version spent twenty to forty seconds in
+    # network round trips for a full MLB pool -- on every rerun, which
+    # in Streamlit means every click.
+    logs_by_player = database.game_logs_for(
+        [str(player["player_id"]) for player in pool], before=slate_date
+    )
 
     pool_rates = build_pool_rates(pool, logs_by_player, config)
 
@@ -161,6 +162,9 @@ def project_slate(
         )
 
     projected: list[dict[str, Any]] = []
+    # Collected and written once. A write per player is a round trip and
+    # a commit per player, which a hosted database charges for.
+    to_store: list[dict[str, Any]] = []
     fallback_count = 0
 
     for player in pool:
@@ -214,7 +218,7 @@ def project_slate(
         projected.append(record)
 
         if store and record["projected_points"] > 0:
-            database.save_projection(slate_id, {
+            to_store.append({
                 "player_id": record["player_id"],
                 "projected_points": record["projected_points"],
                 "floor": record["floor"],
@@ -223,6 +227,9 @@ def project_slate(
                 "projected_opportunity": record.get("projected_opportunity"),
                 "model": "baseline",
             })
+
+    if to_store:
+        database.save_projections(slate_id, to_store)
 
     if fallback_count:
         warnings.append(

@@ -309,3 +309,82 @@ def test_the_database_still_works_after_a_reset(database):
 
 def test_resetting_an_empty_database_is_not_an_error(database):
     assert set(database.reset().values()) == {0}
+
+
+def test_batched_logs_match_fetching_them_one_at_a_time(database):
+    """The batched read must be a pure speed-up, not a different answer.
+
+    It replaced a per-player fetch that cost one network round trip per
+    player -- 942 of them for a real MLB pool. Same rows, same order,
+    same cutoff, or the speed is worthless.
+    """
+
+    ids = [f"mlb:p{index}" for index in range(6)]
+    for player_id in ids:
+        database.upsert_player({
+            "player_id": player_id, "name": player_id,
+            "sport": "MLB", "positions": ["OF"],
+        })
+        for day in range(1, 13):
+            database.save_game_log({
+                "player_id": player_id, "sport": "MLB",
+                "game_date": f"2026-05-{day:02d}", "opportunity": 4,
+                "stats": {"single": day},
+            })
+
+    for before in (None, "2026-05-07"):
+        batched = database.game_logs_for(ids, before=before, limit=5)
+        for player_id in ids:
+            one_at_a_time = database.game_logs(player_id, before=before, limit=5)
+            assert batched[player_id] == one_at_a_time, (player_id, before)
+
+
+def test_the_per_player_limit_is_applied_per_player(database):
+    """Not a limit on the whole result, which would starve later players."""
+
+    for index in range(3):
+        player_id = f"nba:p{index}"
+        database.upsert_player({
+            "player_id": player_id, "name": player_id,
+            "sport": "NBA", "positions": ["PG"],
+        })
+        for day in range(1, 11):
+            database.save_game_log({
+                "player_id": player_id, "sport": "NBA",
+                "game_date": f"2026-03-{day:02d}", "opportunity": 30,
+                "stats": {"pts": day},
+            })
+
+    logs = database.game_logs_for([f"nba:p{i}" for i in range(3)], limit=4)
+
+    assert [len(rows) for rows in logs.values()] == [4, 4, 4]
+
+
+def test_a_player_with_no_logs_still_gets_an_entry(database):
+    """The caller indexes by id; a missing key would be a KeyError on a
+    debut, which is exactly when it must not crash."""
+
+    logs = database.game_logs_for(["nfl:never-played"])
+
+    assert logs == {"nfl:never-played": []}
+
+
+def test_more_players_than_fit_in_one_statement(database):
+    """SQLite caps bound parameters, so the ids are sent in batches."""
+
+    ids = [f"mlb:b{index}" for index in range(Database.ID_BATCH + 25)]
+    for player_id in ids[:3]:
+        database.upsert_player({
+            "player_id": player_id, "name": player_id,
+            "sport": "MLB", "positions": ["OF"],
+        })
+        database.save_game_log({
+            "player_id": player_id, "sport": "MLB",
+            "game_date": "2026-05-01", "opportunity": 4, "stats": {"single": 1},
+        })
+
+    logs = database.game_logs_for(ids)
+
+    assert len(logs) == len(ids)
+    assert all(len(logs[player_id]) == 1 for player_id in ids[:3])
+    assert logs[ids[400]] == []
