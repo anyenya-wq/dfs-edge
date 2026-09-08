@@ -505,3 +505,51 @@ def test_the_pool_returns_what_the_site_said_about_availability(database):
     assert by_name["Announced"]["starting"] == "SP"
     assert by_name["Announced"]["batting_order"] is None
     assert by_name["Leads Off"]["batting_order"] == 1
+
+
+def test_availability_only_touches_players_in_the_pool(database):
+    """The source knows every game that day; the slate is a subset.
+
+    Adding the rest would put players in a pool they cannot be rostered
+    from, which the optimizer would then have to reason about.
+    """
+
+    from dfs.ingest.lineups import Availability
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, [{
+        "player_id": "mlb:in-the-pool", "name": "In The Pool", "sport": "MLB",
+        "positions": ["OF"], "roster_positions": ["OF"], "salary": 5000,
+    }])
+
+    summary = database.apply_availability(slate, [
+        Availability("mlb:in-the-pool", "In The Pool", "MIL", "3", 3),
+        Availability("mlb:another-game", "Another Game", "SEA", "SP", None),
+    ])
+
+    assert summary == {"matched": 1, "unmatched": 1, "orders": 1}
+    assert len(database.player_pool(slate)) == 1
+    assert database.player_pool(slate)[0]["batting_order"] == 3
+
+
+def test_availability_overwrites_what_the_file_said(database):
+    """The file is a snapshot; the source is current. Later wins."""
+
+    from dfs.ingest.lineups import Availability
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, [{
+        "player_id": "mlb:p", "name": "P", "sport": "MLB",
+        "positions": ["OF"], "roster_positions": ["OF"], "salary": 5000,
+        "starting": None, "batting_order": None,
+    }])
+
+    database.apply_availability(slate, [Availability("mlb:p", "P", "MIL", "2", 2)])
+
+    assert database.player_pool(slate)[0]["batting_order"] == 2
+
+
+def test_applying_nothing_is_not_an_error(database):
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+
+    assert database.apply_availability(slate, [])["matched"] == 0

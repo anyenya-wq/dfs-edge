@@ -123,12 +123,16 @@ ruled out and players to force in. The optimizer already honoured locks
 and bans; nothing had ever exposed them, so until now a pitcher who was
 not starting could not be kept out of a lineup at all.
 
-What is still missing is collecting them. Confirmed NBA lineups, NHL
+**Baseball is collected.** *Refresh starters from MLB* reads announced
+pitchers and posted batting orders from statsapi.mlb.com for the slate's
+date, so games that post after the salary file was exported are picked
+up without re-downloading it.
+
+What is still missing is collecting them for the other sports. Confirmed NBA lineups, NHL
 line combinations and starting goalies, and NFL inactives all land
 shortly before lock and all move projections more than any model
-refinement would. MLB's StatsAPI publishes probable pitchers and posted
-lineups on the same endpoint the collector already reads, which makes
-baseball the obvious first one to automate.
+refinement would. No free feed covers them reliably, so they stay
+manual.
 
 ## 5. Real ownership data
 

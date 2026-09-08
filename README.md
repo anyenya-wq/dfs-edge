@@ -179,6 +179,19 @@ all — a worse error than carrying a small risk.
 FanDuel's export has an injury indicator, which is read, but no batting
 order, so its starters are still named by hand.
 
+**Refresh starters from MLB** reads the same facts from
+statsapi.mlb.com — official, free, no key, and the source the stat
+collector already uses. It picks up games that have posted since the
+file was exported, without downloading it again. Only players already
+in the slate's pool are touched, and how many of MLB's players did not
+match is reported, because names are the join and a match rate that
+quietly falls is how a name-joined feed rots.
+
+The aggregator sites are not used. Most prohibit scraping, and a page
+that changes shape yields stale lineups with no error at all — worse
+than none, because you act on them. Reading one yourself and ticking
+the boxes is a different thing, and fine.
+
 **A salary file is a snapshot.** On a fifteen-game slate a dozen starters
 may be announced and the rest not yet. Pitchers are therefore excluded
 only within teams that have named someone: a team that has announced

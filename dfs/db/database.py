@@ -526,6 +526,48 @@ class Database:
 
         return dict(row) if row else None
 
+    def apply_availability(self, slate_id: int, records) -> dict[str, int]:
+        """Update who is starting, from a source other than the file.
+
+        Only touches players already in the pool. The source knows about
+        every game that day; the slate is whichever subset of them the
+        contest covers, and adding the rest would put players in a pool
+        they cannot be rostered from.
+
+        Matched on the name-derived id the pool already uses, so a
+        player the source spells differently is left alone rather than
+        guessed at. The count of misses is returned, because a match
+        rate that quietly falls is how a name-joined feed rots.
+        """
+
+        pool = {str(row["player_id"]) for row in self.player_pool(slate_id)}
+        updates = [
+            (record.starting, record.batting_order, slate_id, record.player_id)
+            for record in records
+            if record.player_id in pool
+        ]
+
+        if updates:
+            with self._lock:
+                self.connection.executemany(
+                    """
+                    UPDATE salaries SET starting = ?, batting_order = ?
+                    WHERE slate_id = ? AND player_id = ?
+                    """,
+                    updates,
+                )
+                self.connection.commit()
+
+        matched = len(updates)
+        total = sum(1 for _ in records) if hasattr(records, "__len__") else matched
+
+        return {
+            "matched": matched,
+            "unmatched": max(total - matched, 0),
+            "orders": sum(1 for record in records
+                          if record.player_id in pool and record.batting_order),
+        }
+
     def set_slate_date(self, slate_id: int, slate_date: str) -> None:
         """Move a slate to the date its games are actually played.
 

@@ -24,6 +24,7 @@ import streamlit as st
 from dfs.db.connection import is_postgres_url
 from dfs.db.database import Database
 from dfs.ingest.detect import detect
+from dfs.ingest.lineups import LineupError, fetch_mlb_lineups
 from dfs.ingest.salaries import is_ruled_out
 from dfs.export import (
     ExportError, readable_filename, to_readable_csv, to_upload_csv, upload_filename,
@@ -318,7 +319,59 @@ def _slate_date_control(database, stored) -> str:
     return stored["slate_date"]
 
 
-def _availability_controls(projected, config, slate_id: int):
+def _refresh_mlb_lineups(database, slate_id: int, slate_date: str) -> dict:
+    """Bring one slate up to date from MLB's own schedule.
+
+    Returns what to tell the user rather than saying it, because the
+    caller reruns immediately afterwards and a rerun discards whatever
+    was drawn before it.
+    """
+
+    try:
+        with st.spinner("Reading lineups from MLB…"):
+            found = fetch_mlb_lineups(slate_date)
+    except LineupError as error:
+        return {
+            "kind": "warning",
+            "icon": "⚠️",
+            "message": (
+                f"Could not reach MLB's schedule: {error} Nothing was "
+                f"changed; what the salary file said still stands."
+            ),
+        }
+
+    if not found:
+        return {
+            "kind": "info",
+            "icon": "ℹ️",
+            "message": f"MLB lists no announced starters for {slate_date} yet.",
+        }
+
+    summary = database.apply_availability(slate_id, found)
+
+    outcome = {
+        "kind": "success",
+        "icon": "✅",
+        "message": (
+            f"Updated {summary['matched']} players — {summary['orders']} in "
+            f"a posted batting order."
+        ),
+    }
+
+    # Said out loud rather than buried. Names are how these two sources
+    # are joined, and a match rate that quietly falls is how a
+    # name-joined feed rots without anyone noticing.
+    if summary["unmatched"]:
+        outcome["caption"] = (
+            f"{summary['unmatched']} of MLB's players were not in this "
+            f"slate's pool — mostly other games, but a spelling difference "
+            f"would look the same."
+        )
+
+    return outcome
+
+
+def _availability_controls(database, projected, config, slate_id: int, slate_date: str):
     """Who is playing, which the salary file does not say.
 
     A salary export lists everyone on the roster, not everyone who will
@@ -375,6 +428,36 @@ def _availability_controls(projected, config, slate_id: int):
         "Who is playing",
         expanded=bool(announced or ruled_out),
     ):
+        # The file is true as of when it was exported. This asks the
+        # source instead, so a slate can be brought up to date without
+        # downloading the salary file again.
+        if config.sport.upper() == "MLB":
+            if st.button(
+                "Refresh starters from MLB",
+                use_container_width=True,
+                help=(
+                    "Reads announced pitchers and posted batting orders from "
+                    "statsapi.mlb.com for this slate's date. Only players "
+                    "already in the pool are touched."
+                ),
+            ):
+                # Kept rather than rendered here. The rerun below is what
+                # makes the new starters appear in the controls, and it
+                # throws away everything drawn before it -- including the
+                # message saying what just happened, success or failure.
+                st.session_state["lineup_refresh"] = _refresh_mlb_lineups(
+                    database, slate_id, slate_date
+                )
+                st.rerun()
+
+        outcome = st.session_state.pop("lineup_refresh", None)
+        if outcome:
+            {"success": st.success, "warning": st.warning, "info": st.info}[
+                outcome["kind"]
+            ](outcome["message"], icon=outcome["icon"])
+            if outcome.get("caption"):
+                st.caption(outcome["caption"])
+
         if announced or ruled_out or posted:
             st.caption(
                 f"Read from the salary file: {len(announced)} announced "
@@ -674,7 +757,9 @@ def main() -> None:
     for warning in warnings:
         st.info(warning, icon="ℹ️")
 
-    locks, bans = _availability_controls(projected, config, slate_id)
+    locks, bans = _availability_controls(
+        database, projected, config, slate_id, slate_date
+    )
 
     settings = gpp_settings(config, lineup_count) if mode == "gpp" else cash_settings(config)
     settings.locks = frozenset(locks)
