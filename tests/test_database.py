@@ -205,3 +205,63 @@ def test_reuploading_keeps_projections_that_were_locked(database):
     database.save_salaries(slate, _players("mlb:", 5, sport="MLB"))
 
     assert len(_projection_ids(database, slate)) == 12
+
+
+def test_a_slate_can_be_found_without_being_created(database):
+    """`upsert_slate` would create one, which hides the question asked."""
+
+    assert database.find_slate("NBA", "DK", "2026-01-15") is None
+
+    slate = database.upsert_slate("NBA", "DK", "2026-01-15")
+
+    assert database.find_slate("NBA", "DK", "2026-01-15") == slate
+
+
+def test_only_slates_with_a_pool_are_offered(database):
+    """A slate row with no salaries has nothing to show."""
+
+    empty = database.upsert_slate("NBA", "DK", "2026-01-15")
+    filled = database.upsert_slate("NFL", "DK", "2026-09-14")
+    database.save_salaries(filled, _players("nfl:", 3, sport="NFL"))
+
+    offered = database.slates_with_players()
+
+    assert [row["id"] for row in offered] == [filled]
+    assert offered[0]["players"] == 3
+    assert empty not in {row["id"] for row in offered}
+
+
+def test_slates_from_several_sports_and_sites_coexist(database):
+    """The whole point of uploading more than one file.
+
+    Each sport-site-date is its own slate, so a Sunday of NFL on both
+    sites and an MLB slate the same evening are three pools that do not
+    overwrite one another.
+    """
+
+    for sport, site, date in (
+        ("NFL", "DK", "2026-09-14"),
+        ("NFL", "FD", "2026-09-14"),
+        ("MLB", "DK", "2026-09-14"),
+    ):
+        slate = database.upsert_slate(sport, site, date)
+        database.save_salaries(slate, _players(f"{sport.lower()}:", 4, sport=sport))
+
+    offered = database.slates_with_players()
+
+    assert len(offered) == 3
+    assert {(row["sport"], row["site"]) for row in offered} == {
+        ("NFL", "DK"), ("NFL", "FD"), ("MLB", "DK"),
+    }
+    assert all(row["players"] == 4 for row in offered)
+
+
+def test_a_slate_reports_what_it_is(database):
+    slate = database.upsert_slate("MLB", "FD", "2026-04-10")
+
+    stored = database.slate(slate)
+
+    assert (stored["sport"], stored["site"], stored["slate_date"]) == (
+        "MLB", "FD", "2026-04-10",
+    )
+    assert database.slate(9_999) is None

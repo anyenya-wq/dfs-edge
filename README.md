@@ -115,6 +115,22 @@ A public deployment gates itself behind `APP_PASSWORD`. Without that
 set, a deployment says so in a banner rather than quietly serving your
 forecasts to anyone with the link.
 
+## Several slates at once
+
+Drop every salary export you have into the uploader together. Each file
+says what it is -- the site from its header row, the sport from the
+positions inside, the date from DraftKings' game column -- so a Sunday
+of NFL on both sites and an MLB slate the same evening go in as one
+action, not four rounds of picking selectors.
+
+A file that does not clearly match one sport is reported and skipped
+rather than assigned to the closest thing. An NBA export read as NFL
+parses perfectly and yields an empty build that looks like a solver
+problem, which is a far more expensive answer than "I could not tell".
+
+Everything uploaded stays available in the **Slate** picker. Switching
+between them reads from storage and re-uploads nothing.
+
 ## Where the data lives
 
 SQLite by default: no server, nothing to configure, and the file sits at

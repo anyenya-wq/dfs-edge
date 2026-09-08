@@ -408,6 +408,59 @@ class Database:
             return count
 
 
+    def find_slate(
+        self, sport: str, site: str, slate_date: str, name: str = "main"
+    ) -> int | None:
+        """An existing slate's id, or None. Creates nothing.
+
+        `upsert_slate` would create one, which is wrong for a caller
+        that only wants to know whether a pool was already uploaded --
+        an empty slate looks the same as a real one until you read it.
+        """
+
+        row = self.connection.execute(
+            """
+            SELECT id FROM slates
+            WHERE sport = ? AND site = ? AND slate_date = ? AND name = ?
+            """,
+            (sport.upper(), site.upper(), slate_date, name),
+        ).fetchone()
+
+        return int(row["id"]) if row else None
+
+    def slate(self, slate_id: int) -> dict[str, Any] | None:
+        """One slate's sport, site and date, by id."""
+
+        row = self.connection.execute(
+            "SELECT id, sport, site, slate_date, name, lock_time FROM slates WHERE id = ?",
+            (slate_id,),
+        ).fetchone()
+
+        return dict(row) if row else None
+
+    def slates_with_players(self, limit: int = 60) -> list[dict[str, Any]]:
+        """Stored slates that actually have a pool, newest first.
+
+        The board offers these as somewhere to return to. A slate with
+        no salaries is a row created and then abandoned -- it has
+        nothing to show, so it is not offered.
+        """
+
+        rows = self.connection.execute(
+            """
+            SELECT sl.id, sl.sport, sl.site, sl.slate_date, sl.name,
+                   COUNT(s.player_id) AS players
+            FROM slates sl
+            JOIN salaries s ON s.slate_id = sl.id
+            GROUP BY sl.id, sl.sport, sl.site, sl.slate_date, sl.name
+            ORDER BY sl.slate_date DESC, sl.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+
+        return [dict(row) for row in rows]
+
     def player_pool(self, slate_id: int) -> list[dict[str, Any]]:
         """The salary pool for a slate, joined to any stored projection."""
 

@@ -22,6 +22,7 @@ import streamlit as st
 
 from dfs.db.connection import is_postgres_url
 from dfs.db.database import Database
+from dfs.ingest.detect import detect
 from dfs.export import (
     ExportError, readable_filename, to_readable_csv, to_upload_csv, upload_filename,
 )
@@ -157,6 +158,107 @@ def get_database(url: str, code_version: float) -> Database:
     return Database(url)
 
 
+def _ingest_uploads(database, uploads, fallback_date: str) -> None:
+    """Store every uploaded salary file as its own slate.
+
+    Each file is asked what it is rather than told. A salary export
+    names its site in the header row and its sport in the positions
+    inside, so uploading five files across four sports takes one drop
+    instead of five rounds of picking selectors.
+
+    A file that cannot be identified is reported and skipped, never
+    guessed at. An NBA export read as NFL parses perfectly, produces a
+    pool eligible for no roster slot, and yields an empty build that
+    looks like a solver problem -- a wrong answer that costs far more
+    than the missing one.
+    """
+
+    stored, skipped = [], []
+
+    for upload in uploads:
+        try:
+            text = upload.getvalue().decode("utf-8-sig")
+        except UnicodeDecodeError:
+            skipped.append((upload.name, "Not a text CSV."))
+            continue
+
+        found = detect(text)
+
+        if not found.complete:
+            skipped.append((upload.name, found.reason or "Could not identify it."))
+            continue
+
+        # FanDuel's export carries no date, so the sidebar's date stands
+        # in. DraftKings writes one into every row and it is used.
+        date = found.slate_date or fallback_date
+
+        try:
+            slate_id, config, pool = load_slate(
+                database, text, found.sport, found.site, date
+            )
+        except (ValueError, KeyError) as error:
+            skipped.append((upload.name, str(error)))
+            continue
+
+        stored.append({
+            "slate_id": slate_id,
+            "label": f"{found.sport}:{found.site} {date}",
+            "players": len(pool),
+            "name": upload.name,
+        })
+
+    for entry in stored:
+        st.success(f"{entry['label']} — {entry['players']} players", icon="✅")
+
+    for name, reason in skipped:
+        st.warning(f"{name}: {reason}", icon="⚠️")
+
+    # Jump straight to a single upload. With several there is nothing to
+    # infer about which one you meant, so the picker is left alone.
+    if len(stored) == 1 and not skipped:
+        st.session_state["slate_choice"] = stored[0]["slate_id"]
+
+
+def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | None:
+    """Which stored slate the board should show.
+
+    The reason this exists: the file uploader empties whenever the page
+    reruns, and the board used to treat that as "no slate", falling back
+    to the getting-started screen. Slates were being saved and then
+    hidden -- switching sport to look at another one meant re-uploading
+    the file you had already uploaded.
+    """
+
+    slates = database.slates_with_players()
+
+    if not slates:
+        return None
+
+    labels = {
+        row["id"]: f"{row['sport']}:{row['site']}  {row['slate_date']}  ({row['players']} players)"
+        for row in slates
+    }
+
+    # Default to the sidebar's selection when a slate matches it, so the
+    # selectors still steer the board.
+    matching = database.find_slate(sport, site, slate_date)
+    default = st.session_state.get("slate_choice")
+    if default not in labels:
+        default = matching if matching in labels else slates[0]["id"]
+
+    ids = list(labels)
+    choice = st.selectbox(
+        "Slate",
+        ids,
+        index=ids.index(default),
+        format_func=lambda slate_id: labels[slate_id],
+        key="slate_choice",
+        help="Every salary file you have uploaded. Switching here does not re-upload anything.",
+    )
+
+    return choice
+
+
 def main() -> None:
     # Before anything else: no database is opened, no history is
     # collected, and no key is used until the password matches.
@@ -191,15 +293,21 @@ def main() -> None:
 
         st.divider()
         st.header("Salaries")
-        upload = st.file_uploader(
-            "Salary export (CSV)",
+        uploads = st.file_uploader(
+            "Salary exports (CSV)",
             type="csv",
+            accept_multiple_files=True,
             help=(
                 "The export from the contest entry screen. On DraftKings this "
                 "is the 'Export to CSV' link above the player list; on FanDuel "
-                "it is 'Download players list'."
+                "it is 'Download players list'. Drop several at once -- each "
+                "file says which sport and site it is, so they do not have to "
+                "be uploaded one at a time."
             ),
         )
+
+        if uploads:
+            _ingest_uploads(database, uploads, slate_date)
 
         st.divider()
         st.header("Build")
@@ -273,18 +381,22 @@ def main() -> None:
             icon="⚠️",
         )
 
-    if upload is None:
+    # Read from storage, not from the uploader. Uploading writes the
+    # slate; showing one reads it back. Keeping those separate is what
+    # lets several sports be loaded at once and switched between, and
+    # what stops a rerun -- which always empties the uploader -- from
+    # looking like there is nothing to show.
+    slate_id = _choose_slate(database, sport, site, slate_date)
+
+    if slate_id is None:
         _show_getting_started(config)
         _show_calibration(database, sport)
         return
 
-    salary_text = upload.getvalue().decode("utf-8-sig")
-
-    try:
-        slate_id, config, pool = load_slate(database, salary_text, sport, site, slate_date)
-    except (ValueError, KeyError) as error:
-        st.error(f"Could not read that salary file: {error}")
-        return
+    stored = database.slate(slate_id)
+    sport, site, slate_date = stored["sport"], stored["site"], stored["slate_date"]
+    config = get_config(sport, site)
+    pool = database.player_pool(slate_id)
 
     mismatches = validate_pool(pool, config)
     for mismatch in mismatches:
