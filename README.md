@@ -131,6 +131,19 @@ problem, which is a far more expensive answer than "I could not tell".
 Everything uploaded stays available in the **Slate** picker. Switching
 between them reads from storage and re-uploads nothing.
 
+## Starting over
+
+```bash
+python -m dfs.cli reset            # reports what it would delete, changes nothing
+python -m dfs.cli reset --confirm  # actually empties every table
+```
+
+Reporting first because deleting is not symmetrical with collecting.
+Game logs rebuild themselves from the same feeds. A locked projection
+does not: it is a forecast made before its games, and a forecast made
+afterwards is not a forecast. The report names how many locked rows are
+about to go.
+
 ## Where the data lives
 
 SQLite by default: no server, nothing to configure, and the file sits at

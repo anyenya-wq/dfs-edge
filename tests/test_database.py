@@ -265,3 +265,47 @@ def test_a_slate_reports_what_it_is(database):
         "MLB", "FD", "2026-04-10",
     )
     assert database.slate(9_999) is None
+
+
+def test_a_reset_reports_what_it_would_destroy(database):
+    """Counted before deleting, because the caller cannot see inside."""
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, _players("mlb:", 4, sport="MLB"))
+
+    counts = database.row_counts()
+
+    assert counts["salaries"] == 4
+    assert counts["slates"] == 1
+    assert counts["players"] == 4
+    # Reporting must not itself change anything.
+    assert database.row_counts() == counts
+
+
+def test_a_reset_empties_every_table_and_says_what_it_removed(database):
+    slate = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(slate, _players("mlb:", 4, sport="MLB"))
+    database.save_projection(slate, {"player_id": "mlb:0", "projected_points": 9.0})
+
+    removed = database.reset()
+
+    assert removed["salaries"] == 4
+    assert removed["projections"] == 1
+    assert set(database.row_counts().values()) == {0}
+
+
+def test_the_database_still_works_after_a_reset(database):
+    """Rows go, tables stay. A dropped schema would need recreating."""
+
+    slate = database.upsert_slate("NFL", "DK", "2026-09-14")
+    database.save_salaries(slate, _players("nfl:", 2, sport="NFL"))
+    database.reset()
+
+    fresh = database.upsert_slate("NFL", "DK", "2026-09-21")
+    database.save_salaries(fresh, _players("nfl:", 3, sport="NFL"))
+
+    assert len(database.player_pool(fresh)) == 3
+
+
+def test_resetting_an_empty_database_is_not_an_error(database):
+    assert set(database.reset().values()) == {0}

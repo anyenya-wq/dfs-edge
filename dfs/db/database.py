@@ -428,6 +428,40 @@ class Database:
 
         return int(row["id"]) if row else None
 
+    # Ordered so a child is emptied before its parent. Reversed, this
+    # is the order rows may be created in.
+    RESET_TABLES = (
+        "actuals", "projections", "lineups", "salaries", "slates",
+        "player_briefs", "game_logs", "collector_runs", "players",
+    )
+
+    def row_counts(self) -> dict[str, int]:
+        """How many rows each table holds. What a reset would destroy."""
+
+        counts = {}
+        for table in self.RESET_TABLES:
+            row = self.connection.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()
+            counts[table] = int(row["n"]) if row else 0
+        return counts
+
+    def reset(self) -> dict[str, int]:
+        """Empty every table, returning what was removed.
+
+        Deliberately not exposed anywhere a stray click can reach. The
+        collected history rebuilds itself, but a locked slate does not:
+        it is a forecast made before its games, and once deleted there
+        is no way to make an honest one about a game already played.
+        """
+
+        removed = self.row_counts()
+
+        with self._lock:
+            for table in self.RESET_TABLES:
+                self.connection.execute(f"DELETE FROM {table}")
+            self.connection.commit()
+
+        return removed
+
     def slate(self, slate_id: int) -> dict[str, Any] | None:
         """One slate's sport, site and date, by id."""
 

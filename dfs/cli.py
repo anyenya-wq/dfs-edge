@@ -312,6 +312,55 @@ def _resolve_due(args: argparse.Namespace) -> int:
     return 1 if failures else 0
 
 
+def _reset(args: argparse.Namespace) -> int:
+    """Empty the database, after saying exactly what that costs.
+
+    Without `--confirm` this reports and changes nothing. Deleting is
+    not symmetrical with collecting: game logs rebuild themselves from
+    the same feeds, but a locked projection cannot be recreated, because
+    a forecast made after the game is not a forecast.
+    """
+
+    database = Database(args.db)
+    counts = database.row_counts()
+    total = sum(counts.values())
+
+    if not total:
+        print("The database is already empty.")
+        database.close()
+        return 0
+
+    locked = database.connection.execute(
+        "SELECT COUNT(*) AS n FROM projections WHERE locked_at IS NOT NULL"
+    ).fetchone()
+    locked = int(locked["n"]) if locked else 0
+
+    print(f"{'table':<16} {'rows':>10}")
+    for table, count in counts.items():
+        print(f"{table:<16} {count:>10,}")
+    print(f"{'total':<16} {total:>10,}")
+
+    if locked:
+        print()
+        print(
+            f"{locked:,} of those projections are LOCKED -- forecasts made "
+            f"before their games. Collected history rebuilds itself; these "
+            f"cannot be made again."
+        )
+
+    if not args.confirm:
+        print()
+        print("Nothing was deleted. Re-run with --confirm to empty these tables.")
+        database.close()
+        return 0
+
+    removed = database.reset()
+    print()
+    print(f"Deleted {sum(removed.values()):,} rows. The database is empty.")
+    database.close()
+    return 0
+
+
 def _calibrate(args: argparse.Namespace) -> int:
     database = Database(args.db)
     records = database.resolved_projections(args.sport)
@@ -425,6 +474,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Lock the slate's projections first (normally done before its games)",
     )
     resolve.set_defaults(handler=_resolve)
+
+    reset = subparsers.add_parser(
+        "reset", help="Empty the database (reports first; needs --confirm)"
+    )
+    reset.add_argument(
+        "--confirm", action="store_true",
+        help="Actually delete. Without this the command only reports.",
+    )
+    reset.set_defaults(handler=_reset)
 
     calibrate = subparsers.add_parser("calibrate", help="Score projections against results")
     calibrate.add_argument("--sport", default=None, choices=SPORTS)
