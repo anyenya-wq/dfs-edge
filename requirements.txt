@@ -1,0 +1,14 @@
+streamlit>=1.30
+pandas>=2.0
+# Reading the parquet box scores the NBA collector downloads.
+pyarrow>=14.0
+# Pinned below 4.0: PuLP 4 replaces direct LpVariable construction and
+# renames the bundled CBC solver, both of which the optimizer uses.
+pulp>=3.0,<4.0
+anthropic>=0.40
+
+# Only needed to talk to PostgreSQL, which a hosted deployment wants and
+# a local one does not: SQLite is built into Python and is the default.
+# Kept here rather than in an extra so `pip install -r requirements.txt`
+# produces something that can run either way.
+psycopg[binary]>=3.1

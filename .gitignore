@@ -1,0 +1,16 @@
+# The DFS database is deliberately not tracked. A season of player-level
+# rows across five sports is far too large to commit, and it is derived
+# data that any collector run can rebuild.
+data/*.db
+data/*.db-journal
+
+# Salary exports are downloaded per slate and are not worth versioning.
+*.csv
+!tests/**/*.csv
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
