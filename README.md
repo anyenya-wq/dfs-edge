@@ -145,6 +145,27 @@ cosmetic: results are matched to a slate by date, so a slate filed under
 a day its games were not played can never be scored. It would sit on the
 calibration record for ever, unresolvable, with nothing to say why.
 
+## Who is actually playing
+
+A salary export lists everyone on the roster, not everyone who will take
+the field, and the app cannot know the difference. In baseball that gap
+is the whole game: forty pitchers are listed and about a dozen start. A
+relief pitcher projects on his rate per inning and will win the
+optimizer outright, on innings he is never going to throw.
+
+**Who is playing**, above the tabs, is where that knowledge is entered:
+
+- **Confirmed starters at P/SP/RP** (goalies in hockey) — a whitelist.
+  Name the dozen who start and every other pitcher leaves the pool.
+  Naming who plays is far less work than excluding who does not.
+- **Out, injured, or benched** — anyone ruled out after the file was
+  published.
+- **Always roster** — forced into every lineup.
+
+Nothing here is guessed. Starters are announced on the site's own draft
+screen an hour or two before lock, and entering them is worth more than
+any refinement to the model behind them.
+
 ## Starting over
 
 ```bash

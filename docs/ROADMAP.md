@@ -115,15 +115,20 @@ The CSV export is the same data, stable, and permitted. If this is ever
 built it should be DraftKings only, opt-in and off by default, with the
 upload always available as the fallback.
 
-## 4. Line and lineup confirmation
+## 4. Line and lineup confirmation — entered by hand, not collected
 
-The projection model can already accept an opportunity override; nothing
-supplies one automatically. Confirmed NBA lineups, NHL line combinations
-and starting goalies, and NFL inactives all land shortly before lock and
-all move projections more than any model refinement would.
+**The controls exist.** *Who is playing* takes confirmed starters at the
+one-per-team positions (pitchers, goalies) as a whitelist, plus players
+ruled out and players to force in. The optimizer already honoured locks
+and bans; nothing had ever exposed them, so until now a pitcher who was
+not starting could not be kept out of a lineup at all.
 
-The research layer reads these per player on demand. A collector that
-watches them for a whole slate would be better.
+What is still missing is collecting them. Confirmed NBA lineups, NHL
+line combinations and starting goalies, and NFL inactives all land
+shortly before lock and all move projections more than any model
+refinement would. MLB's StatsAPI publishes probable pitchers and posted
+lineups on the same endpoint the collector already reads, which makes
+baseball the obvious first one to automate.
 
 ## 5. Real ownership data
 

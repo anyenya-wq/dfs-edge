@@ -344,3 +344,82 @@ def test_a_sport_with_no_exclusion_caps_every_player():
     lineup = optimize_lineup(pool, config, cash_settings(config))
 
     assert sum(1 for p in lineup.players if p.team == "AAA") <= 4
+
+
+# ----------------------------------------------------------------------
+# Who is playing: the salary file lists the roster, not the starters
+# ----------------------------------------------------------------------
+
+
+def test_a_banned_pitcher_never_appears_however_good_he_looks():
+    """The control that matters most in baseball.
+
+    A salary file lists forty pitchers and about a dozen start. A relief
+    pitcher priced like a starter projects on his rate per inning and
+    will win the optimizer outright, on innings he is not going to
+    throw.
+    """
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+    pitchers = [p for p in pool if _is_pitcher_row(p)]
+    star = pitchers[0]
+
+    for player in pool:
+        player["projected_points"] = 200.0 if player is star else 5.0
+
+    settings = cash_settings(config)
+    settings.bans = frozenset({str(star["player_id"])})
+
+    lineup = optimize_lineup(pool, config, settings)
+
+    assert str(star["player_id"]) not in {p.player_id for p in lineup.players}
+
+
+def test_naming_the_confirmed_starters_excludes_the_rest():
+    """A whitelist: name the dozen who start, not the forty who do not."""
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+    pitchers = [str(p["player_id"]) for p in pool if _is_pitcher_row(p)]
+    confirmed = set(pitchers[:4])
+
+    settings = cash_settings(config)
+    settings.bans = frozenset(set(pitchers) - confirmed)
+
+    lineup = optimize_lineup(pool, config, settings)
+    rostered = {p.player_id for p in lineup.players if _is_pitcher(p)}
+
+    assert rostered <= confirmed
+
+
+def test_a_locked_player_appears_even_when_the_projection_says_otherwise():
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+    for player in pool:
+        player["projected_points"] = 5.0
+    unloved = pool[7]
+    unloved["projected_points"] = 0.1
+
+    settings = cash_settings(config)
+    settings.locks = frozenset({str(unloved["player_id"])})
+
+    lineup = optimize_lineup(pool, config, settings)
+
+    assert str(unloved["player_id"]) in {p.player_id for p in lineup.players}
+
+
+def test_banning_so_many_players_that_nothing_is_legal_says_so():
+    """Better than a silent empty result the user has to interpret."""
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+    settings = cash_settings(config)
+    settings.bans = frozenset(str(p["player_id"]) for p in pool if _is_pitcher_row(p))
+
+    with pytest.raises(InfeasibleLineup):
+        optimize_lineup(pool, config, settings)
+
+
+def _is_pitcher_row(player) -> bool:
+    return any(str(p).upper() in ("P", "SP", "RP") for p in player.get("positions") or [])

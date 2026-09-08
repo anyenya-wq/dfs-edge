@@ -316,6 +316,92 @@ def _slate_date_control(database, stored) -> str:
     return stored["slate_date"]
 
 
+def _availability_controls(projected, config, slate_id: int):
+    """Who is playing, which the salary file does not say.
+
+    A salary export lists everyone on the roster, not everyone who will
+    take the field. In baseball that gap is the whole game: forty
+    pitchers are listed and about a dozen start, and a relief pitcher
+    priced like a starter is a projection built on nothing. Hockey has
+    the same shape with goalies.
+
+    Nothing here is guessed. The starters are announced on the site's
+    own draft screen and in every lineup feed an hour or two before
+    lock; this is where that knowledge is entered, because it is worth
+    more than any refinement to the model behind it.
+
+    Returns (locks, bans) as player id sets.
+    """
+
+    by_id = {str(player["player_id"]): player for player in projected}
+
+    def label(player_id: str) -> str:
+        player = by_id[player_id]
+        positions = "/".join(player.get("positions") or [])
+        return f"{player['name']} ({positions}, {player.get('team') or '?'})"
+
+    # Pitchers and goalies: the positions a sport scores on its own
+    # table, which is exactly the set where one player starts and the
+    # rest do not play at all.
+    starter_positions = {p.upper() for p in config.alt_scoring_positions}
+
+    starters = sorted(
+        (player_id for player_id, player in by_id.items()
+         if starter_positions & {str(p).upper() for p in player.get("positions") or []}),
+        key=lambda player_id: -float(by_id[player_id].get("projected_points") or 0.0),
+    )
+
+    locks: set[str] = set()
+    bans: set[str] = set()
+
+    with st.expander("Who is playing", expanded=False):
+        if starters:
+            names = "/".join(sorted(starter_positions))
+            confirmed = st.multiselect(
+                f"Confirmed starters at {names}",
+                starters,
+                format_func=label,
+                key=f"starters_{slate_id}",
+                help=(
+                    f"Name the {names} who are actually starting. Everyone "
+                    f"else at that position is dropped from the pool. Leave "
+                    f"empty to consider them all, which is only right before "
+                    f"starters are announced."
+                ),
+            )
+
+            if confirmed:
+                # A whitelist, because naming the dozen who start is far
+                # less work than excluding the forty who do not.
+                bans |= {player_id for player_id in starters if player_id not in confirmed}
+                st.caption(
+                    f"{len(confirmed)} confirmed; {len(bans)} other "
+                    f"{names} excluded from lineup construction."
+                )
+
+        others = sorted(by_id, key=lambda player_id: label(player_id).lower())
+
+        out = st.multiselect(
+            "Out, injured, or benched",
+            others,
+            format_func=label,
+            key=f"out_{slate_id}",
+            help="Anyone ruled out after the salary file was published.",
+        )
+        bans |= set(out)
+
+        locked = st.multiselect(
+            "Always roster",
+            [player_id for player_id in others if player_id not in bans],
+            format_func=label,
+            key=f"lock_{slate_id}",
+            help="Forced into every lineup. Too many of these and no legal lineup exists.",
+        )
+        locks |= set(locked)
+
+    return locks, bans
+
+
 def main() -> None:
     # Before anything else: no database is opened, no history is
     # collected, and no key is used until the password matches.
@@ -467,7 +553,11 @@ def main() -> None:
     for warning in warnings:
         st.info(warning, icon="ℹ️")
 
+    locks, bans = _availability_controls(projected, config, slate_id)
+
     settings = gpp_settings(config, lineup_count) if mode == "gpp" else cash_settings(config)
+    settings.locks = frozenset(locks)
+    settings.bans = frozenset(bans)
     settings.ceiling_weight = ceiling_weight
     settings.ownership_penalty = ownership_penalty
     settings.max_exposure = max_exposure
