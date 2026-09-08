@@ -98,17 +98,6 @@ Or run the board:
 streamlit run app.py
 ```
 
-From anywhere else in the repository, use the launcher at the root:
-
-```bash
-./run-dfs-edge.sh
-```
-
-It also installs anything missing from `requirements.txt` first. A
-Codespace built from the repository root installs the *root's*
-requirements, which are Project Oracle's, so DFS Edge's own
-dependencies -- `pulp`, `pyarrow`, and `psycopg` when the database URL
-points at PostgreSQL -- are not there by default.
 
 The repository root holds a second Streamlit app -- Project Oracle --
 also called `app.py`. Running `streamlit run app.py` from the root

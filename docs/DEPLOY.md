@@ -23,12 +23,9 @@ Free, always on, one fixed URL.
 2. At <https://share.streamlit.io>, **Create app** → **Deploy a public
    app from GitHub**.
 3. Fill in:
-   - **Repository**: `anyenya-wq/prediction-market-oracle`
-   - **Branch**: `main` (after the DFS Edge branch is merged)
-   - **Main file path**: `dfs-edge/app.py`
-
-   The path matters: the repository root holds a second Streamlit app,
-   Project Oracle, whose file is also called `app.py`.
+   - **Repository**: `anyenya-wq/dfs-edge`
+   - **Branch**: `main`
+   - **Main file path**: `app.py`
 4. Open **Advanced settings** → **Secrets** and paste:
 
    ```toml
@@ -38,11 +35,24 @@ Free, always on, one fixed URL.
 
    Optionally `ANTHROPIC_API_KEY` as well, which turns on the research
    briefs. Leave it out and everything else still works.
-5. **Deploy**. The first build installs `dfs-edge/requirements.txt` and
+5. **Deploy**. The first build installs `requirements.txt` and
    takes a few minutes.
 
 Secrets can be edited afterwards from the app's ⋮ menu → **Settings** →
 **Secrets**. Changing them restarts the app.
+
+## This repository is public
+
+The code is public; the app is not. Streamlit's free tier allows one
+private app per workspace, and Project Oracle holds that slot in the
+repository this was extracted from -- public repositories get unlimited
+public apps, which is why this one is public.
+
+Nothing secret is committed here. Every credential lives in Streamlit's
+Secrets or in GitHub's, and the database and salary exports are ignored
+by git. What a reader can see is how the projections are built, which
+is not the edge: the edge is the data behind them and the discipline of
+scoring what was forecast.
 
 ## The password
 
@@ -76,8 +86,8 @@ every page.
 
 ## The nightly scoring job
 
-Separate from the app. `.github/workflows/dfs-edge-resolve.yml` scores
-locked slates whose games have finished, and needs `DFS_DATABASE_URL`
-as a **repository secret** (Settings → Secrets and variables → Actions).
-GitHub only runs scheduled workflows from the default branch, so it
-starts working once the DFS Edge branch is merged to `main`.
+Separate from the app. `.github/workflows/resolve.yml` scores locked
+slates whose games have finished, and needs `DFS_DATABASE_URL` as a
+**repository secret** (Settings → Secrets and variables → Actions).
+GitHub runs scheduled workflows only from the default branch, which is
+where this one lives.

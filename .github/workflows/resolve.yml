@@ -1,0 +1,79 @@
+name: DFS Edge score locked slates
+
+# Scores every locked slate whose games have finished, so the forward
+# calibration record fills without anyone remembering to press a button.
+#
+# This matters more than it looks. A locked slate is a forecast on the
+# record and is worth nothing until it is scored; the whole point of
+# locking one before its games is to build a record that a backtest
+# cannot fake. A record that only grows on the days somebody opens the
+# app is too sparse to read, and the gaps are not random -- they are the
+# slates that went badly enough to put you off looking.
+#
+# Does nothing at all unless DFS_DATABASE_URL is set as a repository
+# secret. A run against a fresh runner's empty SQLite file would find no
+# slates and report success, which is a worse outcome than saying it was
+# not configured.
+
+on:
+  schedule:
+    # 11:00 UTC: after the previous day's games have finished everywhere
+    # in North America, and after the feeds have published their box
+    # scores.
+    - cron: "0 11 * * *"
+
+  # A scheduled workflow that has never run is the same false comfort as
+  # one in a directory GitHub ignores.
+  push:
+    paths:
+      - ".github/workflows/resolve.yml"
+
+  workflow_dispatch: {}
+
+jobs:
+  resolve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check the database is configured
+        id: configured
+        env:
+          DFS_DATABASE_URL: ${{ secrets.DFS_DATABASE_URL }}
+        run: |
+          if [ -z "${DFS_DATABASE_URL}" ]; then
+            echo "DFS_DATABASE_URL is not set as a repository secret."
+            echo "Nothing to score: this job reads the same database the app"
+            echo "writes to, so it needs that database's URL."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Refreshes the history for each sport involved, then scores every
+      # locked slate whose box scores have arrived. Slates still waiting
+      # on a feed are left for tomorrow rather than recorded as a day
+      # nobody played.
+      - name: Score every locked slate whose games have finished
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          DFS_DATABASE_URL: ${{ secrets.DFS_DATABASE_URL }}
+        run: python -m dfs.cli resolve --due
+
+      - name: Report the calibration record
+        if: steps.configured.outputs.ready == 'true'
+        env:
+          DFS_DATABASE_URL: ${{ secrets.DFS_DATABASE_URL }}
+        run: python -m dfs.cli calibrate

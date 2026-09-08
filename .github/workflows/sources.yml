@@ -1,0 +1,56 @@
+name: DFS Edge upstream sources
+
+# Runs the network-gated tests against the real data sources on a
+# schedule. The ordinary test job skips them, because a suite that fails
+# when someone else's API has a bad minute trains you to ignore it.
+#
+# This exists because upstream changes are silent by nature. nflverse
+# renamed the release holding its weekly stats from `player_stats` to
+# `stats_player`, and nothing broke: the collector kept reporting 2024
+# as the newest season available while 2025 sat published under the new
+# name, and every NFL projection was built on roles a year out of date.
+# A weekly run turns that class of failure into a red tick instead of a
+# quiet decline in accuracy.
+#
+# Failures here mean an upstream feed moved, not that this repository
+# did.
+
+on:
+  schedule:
+    # Monday morning, after weekend fixtures have settled.
+    - cron: "0 9 * * 1"
+
+  # Also on any change to this file. A weekly job is otherwise only
+  # exercised weekly, so a mistake in it sits undiscovered until the
+  # next Monday -- and a scheduled workflow that has never run is the
+  # same false comfort as a workflow in a directory GitHub ignores.
+  push:
+    paths:
+      - ".github/workflows/sources.yml"
+
+  workflow_dispatch: {}
+
+jobs:
+  live-sources:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      # The whole suite with the network gate open, rather than a
+      # selector that has to be kept in step with the test layout.
+      - name: Check every collector against its live source
+        env:
+          DFS_NETWORK_TESTS: "1"
+        run: pytest -q
