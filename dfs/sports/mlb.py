@@ -16,7 +16,7 @@ that as a constraint rather than trusting the objective to notice.
 
 from __future__ import annotations
 
-from dfs.sports.base import RosterSlot, SportConfig, StackRule
+from dfs.sports.base import DerivedStat, RosterSlot, SportConfig, StackRule
 
 _STACKS = (
     StackRule(
@@ -77,7 +77,30 @@ _FD_PITCHING = {
     "k": 3.0,
     "win": 6.0,
     "er": -3.0,
+    # Six innings or more with three earned runs or fewer. FanDuel pays
+    # for it and DraftKings does not, which is one of the larger
+    # differences between the two pitcher tables: roughly a third of
+    # starts qualify, so leaving it out cost every FanDuel starter
+    # around a point and a third.
+    "quality_start": 4.0,
 }
+
+def _is_quality_start(line) -> float:
+    """Six innings or more, three earned runs or fewer.
+
+    Earned runs are read with a default because the collector stores
+    only non-zero stats: a pitcher who allowed none has no `er` key at
+    all, and that is the best quality start there is.
+    """
+
+    return 1.0 if line.get("ip", 0.0) >= 6.0 and line.get("er", 0.0) <= 3.0 else 0.0
+
+
+# Requires `ip`, which is what keeps it off a hitter's line entirely.
+_QUALITY_START = DerivedStat(
+    name="quality_start", requires=("ip",), rule=_is_quality_start,
+)
+
 
 DK_MLB = SportConfig(
     sport="MLB",
@@ -101,6 +124,9 @@ DK_MLB = SportConfig(
     stack_shapes=_STACKS,
     alt_scoring_positions=("P", "SP", "RP"),
     alt_scoring=_DK_PITCHING,
+    # Derived on both sites so the two are scored from identical lines.
+    # DraftKings' table simply has no key for it, so it pays nothing.
+    derived=(_QUALITY_START,),
 )
 
 FD_MLB = SportConfig(
@@ -123,4 +149,10 @@ FD_MLB = SportConfig(
     stack_shapes=_STACKS,
     alt_scoring_positions=("P", "SP", "RP"),
     alt_scoring=_FD_PITCHING,
+    derived=(_QUALITY_START,),
+    # Both tables read off FanDuel's own Rules & Scoring tab, which is
+    # the only source that settles it. Every hitting line matched what
+    # was already here; the pitching table was missing the quality
+    # start entirely.
+    rules_verified=True,
 )

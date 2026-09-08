@@ -47,7 +47,10 @@ VERIFICATION_NOTES: dict[str, str] = {
     "MLB:DK": ("Scoring corroborated against independent sources, but not read "
                "from DraftKings' own rules page. Still unconfirmed: the "
                "five-hitter-per-team cap."),
-    "MLB:FD": "Confirm the $35,000 cap, which is far lower than every other FanDuel sport.",
+    "MLB:FD": ("Scoring read from FanDuel's own Rules & Scoring tab and now "
+               "matches it line for line. The tab does not show roster "
+               "limits, so the $35,000 cap and the four-per-team maximum are "
+               "still unconfirmed."),
     "NHL:DK": "Confirm the three skater step bonuses at 3 goals / 5 shots / 3 blocks.",
     "NHL:FD": "Confirm goalie save 0.6 and goal-against -3.0.",
     "EPL:DK": "UNVERIFIED. Peripheral rates (cross, tackle, interception) are low confidence.",

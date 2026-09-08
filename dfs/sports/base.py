@@ -20,7 +20,7 @@ the answer rather than hiding it.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 
 @dataclasses.dataclass(frozen=True)
@@ -53,6 +53,32 @@ class Bonus:
     stat: str
     threshold: float
     points: float
+
+
+@dataclasses.dataclass(frozen=True)
+class DerivedStat:
+    """A stat no feed carries, computed from ones that it does.
+
+    A quality start is not a field in any box score; it is a definition
+    applied to innings pitched and earned runs. Both are already stored,
+    so the choice is where to apply it.
+
+    Applied here, at scoring time, rather than in the collector. That
+    means it holds for history that was already collected -- otherwise
+    adding a scoring line would silently mis-score every stored game
+    until someone re-downloaded a season, and the projections built on
+    that history would be wrong in the meantime with nothing to show
+    for it.
+
+    `requires` names the stats that must be present for the rule to
+    apply at all, which is what keeps it off the lines it does not
+    describe: a hitter has no innings pitched, so a hitter can never
+    accidentally record a quality start.
+    """
+
+    name: str
+    requires: tuple[str, ...]
+    rule: "Callable[[Mapping[str, float]], float]"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -134,6 +160,8 @@ class SportConfig:
     # Step functions over a single stat, scored on top of the linear
     # table. Only football uses these, for points allowed.
     tiers: tuple[TieredScore, ...] = ()
+    # Stats computed from the line rather than read from it.
+    derived: tuple[DerivedStat, ...] = ()
     # False until a human has checked these numbers against the site's
     # published rules for the current season. Surfaced in the UI.
     rules_verified: bool = False
@@ -153,6 +181,29 @@ class SportConfig:
             return self.alt_scoring
         return self.scoring
 
+    def with_derived(self, stats: Mapping[str, float]) -> Mapping[str, float]:
+        """`stats` plus anything the rules derive from it.
+
+        A value already in the line wins: a feed that starts publishing
+        the stat directly should not be overruled by a definition.
+        """
+
+        if not self.derived:
+            return stats
+
+        line = dict(stats)
+
+        for derived in self.derived:
+            if derived.name in line:
+                continue
+            if not all(stat in line for stat in derived.requires):
+                continue
+            value = derived.rule(line)
+            if value:
+                line[derived.name] = value
+
+        return line
+
     def score_stat_line(self, stats: Mapping[str, float], positions: Sequence[str]) -> float:
         """Fantasy points for a completed stat line.
 
@@ -163,6 +214,7 @@ class SportConfig:
         """
 
         table = self.scoring_table(positions)
+        stats = self.with_derived(stats)
         total = sum(float(value) * table[stat] for stat, value in stats.items() if stat in table)
 
         for bonus in self.bonuses:

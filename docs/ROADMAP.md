@@ -63,6 +63,22 @@ half-and-half blend, with the weight chosen on 2023, is worth **+0.088
 on held-out 2024**. A defence projected from its own history is worth
 nothing; the matchup is the projection.
 
+## 1b. Scoring rules — one pair now verified at source
+
+**MLB:FD is read from FanDuel's own Rules & Scoring tab.** Every hitting
+line already matched. The pitching table was missing the quality start
+entirely -- four points on roughly a third of starts, which DraftKings
+does not pay for at all.
+
+It is derived at scoring time rather than at collection, from innings
+and earned runs, so history collected before the rule existed scores
+correctly without a re-download. That is the pattern to follow for any
+scoring line added later.
+
+Still unverified at source: both NFL pairs, both NBA pairs, MLB:DK, both
+NHL pairs, and both EPL pairs. Each carries a note in the app naming
+what specifically is unchecked.
+
 ## 2. Hosting — done
 
 The database is addressed by URL, so SQLite runs locally and PostgreSQL

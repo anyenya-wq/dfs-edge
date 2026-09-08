@@ -106,3 +106,48 @@ def test_soccer_tables_are_flagged_unverified():
     for key in ("EPL:DK", "EPL:FD"):
         assert "UNVERIFIED" in VERIFICATION_NOTES[key]
         assert not CONFIGS[key].rules_verified
+
+
+# ----------------------------------------------------------------------
+# MLB:FD, read off FanDuel's own Rules & Scoring tab
+# ----------------------------------------------------------------------
+
+
+FD_MLB_RULES = {
+    # Hitting, exactly as the page lists it.
+    "single": 3, "double": 6, "triple": 9, "hr": 12,
+    "rbi": 3.5, "run": 3.2, "bb": 3, "hbp": 3, "sb": 6,
+}
+
+FD_MLB_PITCHING_RULES = {"er": -3, "ip": 3, "quality_start": 4, "k": 3, "win": 6}
+
+
+def test_fanduel_mlb_hitting_matches_the_published_table():
+    config = get_config("MLB", "FD")
+
+    for stat, points in FD_MLB_RULES.items():
+        assert config.scoring[stat] == points, stat
+
+
+def test_fanduel_mlb_pitching_matches_the_published_table():
+    """The quality start was missing until the rules page was read."""
+
+    config = get_config("MLB", "FD")
+
+    for stat, points in FD_MLB_PITCHING_RULES.items():
+        assert config.alt_scoring[stat] == points, stat
+
+
+def test_the_published_table_has_nothing_the_config_lacks():
+    """A row on the page with no key here is a scoring line going unpaid."""
+
+    config = get_config("MLB", "FD")
+
+    assert not set(FD_MLB_RULES) - set(config.scoring)
+    assert not set(FD_MLB_PITCHING_RULES) - set(config.alt_scoring)
+
+
+def test_draftkings_mlb_pays_no_quality_start():
+    """The two pitcher tables differ here, and it is worth four points."""
+
+    assert "quality_start" not in get_config("MLB", "DK").alt_scoring

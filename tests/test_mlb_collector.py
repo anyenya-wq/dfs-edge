@@ -454,3 +454,92 @@ def test_one_bad_game_does_not_lose_the_rest(monkeypatch, tmp_path):
 
     assert summary["logs"] == 1
     assert summary["failed_games"] == 1
+
+
+# ----------------------------------------------------------------------
+# Quality starts, which FanDuel pays for and DraftKings does not
+# ----------------------------------------------------------------------
+
+
+def _quality_start(**overrides) -> float:
+    """Whether a collected line reads as a quality start when scored."""
+
+    record = _pitcher(**overrides)
+    line = get_config("MLB", "FD").with_derived(record["stats"])
+    return line.get("quality_start", 0.0)
+
+
+def test_six_innings_and_three_earned_runs_is_a_quality_start():
+    """Inclusive on both sides: 6.0 innings and 3 earned runs qualify."""
+
+    assert _quality_start(inningsPitched="6.0", earnedRuns=3) == 1.0
+
+
+def test_five_and_two_thirds_innings_is_not_a_quality_start():
+    """One out short, however few runs were allowed."""
+
+    assert _quality_start(inningsPitched="5.2", earnedRuns=0) == 0.0
+
+
+def test_a_fourth_earned_run_loses_the_quality_start():
+    assert _quality_start(inningsPitched="8.0", earnedRuns=4) == 0.0
+
+
+def test_a_shutout_start_qualifies_though_it_stores_no_earned_runs():
+    """The collector stores only non-zero stats, so a clean start has no
+    `er` key at all -- and that is the best quality start there is."""
+
+    record = _pitcher(inningsPitched="7.0", earnedRuns=0)
+    assert "er" not in record["stats"]
+    assert _quality_start(inningsPitched="7.0", earnedRuns=0) == 1.0
+
+
+def test_a_line_collected_before_the_rule_existed_still_scores_it():
+    """Why this is derived at scoring time rather than at collection.
+
+    Every MLB log already in the database was written without a
+    quality-start field. Deriving it from innings and earned runs means
+    that history scores correctly now, instead of staying wrong until
+    somebody re-downloaded a season.
+    """
+
+    stored = {"ip": 7.0, "er": 1, "k": 8, "win": 1}
+    fanduel = get_config("MLB", "FD")
+
+    assert "quality_start" not in stored
+    assert fanduel.with_derived(stored)["quality_start"] == 1.0
+
+
+def test_a_hitter_can_never_record_a_quality_start():
+    """The rule requires innings pitched, which a hitter never has."""
+
+    line = {"single": 9, "run": 9, "rbi": 9}
+    assert "quality_start" not in get_config("MLB", "FD").with_derived(line)
+
+
+def test_the_quality_start_pays_on_fanduel_and_not_on_draftkings():
+    """Four points, on roughly a third of starts.
+
+    Read from FanDuel's own Rules & Scoring tab. DraftKings' pitcher
+    table has no such line, so the same outing is worth four points more
+    on one site than on the other before anything else is counted.
+    """
+
+    # One out apart, either side of the six-inning threshold.
+    line = {"ip": 6.0, "er": 1, "k": 8, "win": 1}
+    short = {"ip": 5.667, "er": 1, "k": 8, "win": 1}
+
+    fanduel = get_config("MLB", "FD")
+    draftkings = get_config("MLB", "DK")
+
+    # Same rate stats, one out either side of the threshold. On FanDuel
+    # the extra third of an inning is worth 1 for the inning plus 4 for
+    # the quality start; on DraftKings it is worth only the inning.
+    # `short` is 5.667, a rounded two-thirds, so the innings term is a
+    # thousandth off exact -- hence the tolerance rather than equality.
+    assert score_stat_line(line, ["P"], fanduel) - score_stat_line(
+        short, ["P"], fanduel
+    ) == pytest.approx(1.0 + 4.0, abs=1e-2)
+    assert score_stat_line(line, ["P"], draftkings) - score_stat_line(
+        short, ["P"], draftkings
+    ) == pytest.approx(0.75, abs=1e-2)
