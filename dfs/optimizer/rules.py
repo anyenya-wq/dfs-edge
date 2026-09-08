@@ -40,6 +40,16 @@ class StackRequirement:
     count: int = 1
     bring_back: int = 0
     teams: int = 1
+    # Require the stacked hitters to occupy consecutive slots in the
+    # batting order. A four-man stack of the 2, 3, 4 and 5 hitters bats
+    # as a block: one big inning pays all four, which is the whole point
+    # of stacking. The same four scattered through the order need four
+    # separate innings to go right.
+    #
+    # Applied only to teams whose order is known. A lineup that has not
+    # been posted yet cannot satisfy it, and enforcing it there would
+    # mean no legal lineup at all rather than a looser one.
+    consecutive: bool = False
     label: str = ""
 
 

@@ -179,6 +179,27 @@ all — a worse error than carrying a small risk.
 FanDuel's export has an injury indicator, which is read, but no batting
 order, so its starters are still named by hand.
 
+**A salary file is a snapshot.** On a fifteen-game slate a dozen starters
+may be announced and the rest not yet. Pitchers are therefore excluded
+only within teams that have named someone: a team that has announced
+nobody keeps all of its pitchers, and the app says which teams those
+are. Export the file again nearer lock and the gaps fill in.
+
+### Batting-order stacks
+
+Once a lineup is posted the order is known, so a team stack becomes a
+*block* of it — the 2, 3, 4 and 5 hitters rather than any four. One big
+inning pays a block at once, which is the point of stacking; the same
+four scattered through the order need four separate innings to go right.
+The order wraps, because it is a cycle: 8, 9, 1, 2 is as consecutive as
+2, 3, 4, 5.
+
+Teams whose lineup has not been posted keep the looser "any four from
+one team" rule, since a block cannot be required of an order nobody has
+published. And if no consecutive block can fill the roster slots — four
+in a row containing two shortstops, say — the build falls back to the
+looser rule and says so, rather than returning nothing.
+
 ## Starting over
 
 ```bash

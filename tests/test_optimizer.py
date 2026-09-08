@@ -423,3 +423,101 @@ def test_banning_so_many_players_that_nothing_is_legal_says_so():
 
 def _is_pitcher_row(player) -> bool:
     return any(str(p).upper() in ("P", "SP", "RP") for p in player.get("positions") or [])
+
+
+# ----------------------------------------------------------------------
+# Batting-order stacks: a block of the order, not four scattered hitters
+# ----------------------------------------------------------------------
+
+
+LINEUP_CARD = ["C", "1B", "2B", "3B", "SS", "OF", "OF", "OF", "OF"]
+
+
+def _with_batting_orders(pool):
+    """Give every team a believable lineup card."""
+
+    from collections import defaultdict
+
+    slots = defaultdict(list)
+    for player in pool:
+        if _is_pitcher_row(player):
+            continue
+        filled = slots[player["team"]]
+        if len(filled) < 9 and player["positions"][0] == LINEUP_CARD[len(filled)]:
+            filled.append(player)
+            player["batting_order"] = len(filled)
+    return pool
+
+
+def _has_consecutive_block(orders, count) -> bool:
+    """Whether `orders` contains a run of `count` slots, wrapping at 9."""
+
+    present = set(orders)
+    for start in range(1, 10):
+        window = {((start - 1 + step) % 9) + 1 for step in range(count)}
+        if window <= present:
+            return True
+    return False
+
+
+def test_a_team_stack_becomes_a_block_of_the_batting_order():
+    """One big inning pays a block at once. The same four hitters
+    scattered through the order need four separate innings."""
+
+    import dataclasses
+    from collections import defaultdict
+
+    config = get_config("MLB", "DK")
+    pool = _with_batting_orders(_pool(config))
+    for index, player in enumerate(pool):
+        player["projected_points"] = 8.0 + (index % 7)
+
+    settings = gpp_settings(config, 1)
+    settings.stacks = tuple(
+        dataclasses.replace(stack, consecutive=True) if stack.kind == "team" else stack
+        for stack in settings.stacks
+    )
+
+    lineup = optimize_lineup(pool, config, settings)
+
+    by_id = {str(player["player_id"]): player for player in pool}
+    orders = defaultdict(list)
+    for slot in lineup.players:
+        player = by_id[slot.player_id]
+        if player.get("batting_order"):
+            orders[player["team"]].append(player["batting_order"])
+
+    stack = next(s for s in settings.stacks if s.kind == "team")
+    assert any(
+        _has_consecutive_block(slots, stack.count) for slots in orders.values()
+    ), dict(orders)
+
+
+def test_the_order_wraps_because_it_is_a_cycle():
+    """The 8, 9 and 1 hitters bat in succession just as 2, 3, 4 do."""
+
+    assert _has_consecutive_block([8, 9, 1, 2], 4)
+    assert _has_consecutive_block([9, 1, 2], 3)
+    assert not _has_consecutive_block([1, 2, 4, 5], 4)
+
+
+def test_a_team_with_no_posted_lineup_is_left_under_the_looser_rule():
+    """Enforcing an order nobody has published yet would mean no lineup
+    at all rather than a looser one."""
+
+    import dataclasses
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)          # deliberately no batting orders
+    for index, player in enumerate(pool):
+        player["projected_points"] = 8.0 + (index % 7)
+
+    settings = gpp_settings(config, 1)
+    settings.stacks = tuple(
+        dataclasses.replace(stack, consecutive=True) if stack.kind == "team" else stack
+        for stack in settings.stacks
+    )
+
+    lineup = optimize_lineup(pool, config, settings)
+
+    assert len(lineup.players) == config.roster_size

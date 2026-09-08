@@ -226,10 +226,72 @@ def _add_stack_constraints(
                     f"stack{index}_team_bringback_{team}",
                 )
 
+    if stack.consecutive:
+        _require_consecutive_order(problem, stack, index, by_team, used, stacked)
+
     problem += (
         pulp.lpSum(stacked.values()) >= stack.teams,
         f"stack{index}_team_count",
     )
+
+
+def _require_consecutive_order(problem, stack, index, by_team, used, stacked) -> None:
+    """Make a chosen team's stack a block of the batting order.
+
+    Expressed as windows. For each run of `count` consecutive slots, a
+    binary says the stack starts there; choosing a team requires
+    choosing one of its windows, and choosing a window requires every
+    hitter in it. The order wraps, because it is a cycle -- the 8, 9 and
+    1 hitters bat in succession just as 2, 3 and 4 do.
+
+    A team whose lineup is not posted has no order to be consecutive in,
+    and is left under the plain "any `count` players" rule instead. The
+    alternative is a constraint nothing can satisfy, which would produce
+    no lineup rather than a looser one.
+    """
+
+    for team, players in by_team.items():
+        by_order = {}
+        for player in players:
+            order = player.get("batting_order")
+            player_id = str(player["player_id"])
+            if order and player_id in used:
+                by_order.setdefault(int(order), []).append(used[player_id])
+
+        # Nothing to enforce: either no posted lineup, or too few of its
+        # hitters are in the pool to fill a window.
+        if len(by_order) < stack.count:
+            continue
+
+        windows = []
+        for start in sorted(by_order):
+            slots = [((start - 1 + step) % 9) + 1 for step in range(stack.count)]
+            if not all(slot in by_order for slot in slots):
+                continue
+
+            window = pulp.LpVariable(
+                f"stack{index}_window_{team}_{start}", cat="Binary"
+            )
+            windows.append(window)
+
+            for slot in slots:
+                # One variable per slot: a hitter listed at that spot
+                # must be rostered if this window is chosen. Several
+                # players can share a slot only if the file is odd, so
+                # the sum covers that without assuming it.
+                problem += (
+                    pulp.lpSum(by_order[slot]) >= window,
+                    f"stack{index}_window_{team}_{start}_slot_{slot}",
+                )
+
+        if not windows:
+            problem += stacked[team] == 0, f"stack{index}_no_window_{team}"
+            continue
+
+        problem += (
+            pulp.lpSum(windows) >= stacked[team],
+            f"stack{index}_window_choice_{team}",
+        )
 
 
 def optimize_lineup(

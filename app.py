@@ -12,6 +12,7 @@ Run with:  streamlit run app.py
 
 from __future__ import annotations
 
+import dataclasses
 import datetime as dt
 import hmac
 import os
@@ -31,7 +32,7 @@ from dfs.ingest.stats import (
     INCOMPLETE, CollectorError, PLANNED, has_collector, is_stale, load_history,
     log_counts, refresh_history,
 )
-from dfs.optimizer.lineup import optimize_lineups
+from dfs.optimizer.lineup import InfeasibleLineup, optimize_lineups
 from dfs.optimizer.rules import cash_settings, gpp_settings
 from dfs.ownership.leverage import apply_leverage, gpp_score
 from dfs.pipeline import (
@@ -403,13 +404,41 @@ def _availability_controls(projected, config, slate_id: int):
             )
 
             if confirmed:
-                # A whitelist, because naming the dozen who start is far
-                # less work than excluding the forty who do not.
-                bans |= {player_id for player_id in starters if player_id not in confirmed}
+                # Only within teams that have named someone. A salary
+                # file is a snapshot: on a fifteen-game slate a dozen
+                # starters may be announced and the rest not yet, and
+                # excluding every pitcher who is not on the list would
+                # quietly delete those games from the pool -- including
+                # the starters, who cannot then be rostered at all.
+                #
+                # So a pitcher is excluded when a team-mate has been
+                # announced and he has not. A team that has announced
+                # nobody keeps all of its pitchers.
+                decided = {
+                    by_id[player_id].get("team")
+                    for player_id in confirmed
+                    if by_id[player_id].get("team")
+                }
+                bans |= {
+                    player_id for player_id in starters
+                    if player_id not in confirmed
+                    and by_id[player_id].get("team") in decided
+                }
+                undecided = sorted(
+                    {by_id[player_id].get("team") for player_id in starters
+                     if by_id[player_id].get("team")} - decided
+                )
                 st.caption(
                     f"{len(confirmed)} confirmed; {len(bans)} other "
-                    f"{names} excluded from lineup construction."
+                    f"{names} on those teams excluded."
                 )
+                if undecided:
+                    st.caption(
+                        f":orange[{len(undecided)} team(s) have not announced "
+                        f"anyone yet — {', '.join(undecided)}. Their pitchers "
+                        f"are all still in the pool. Export the file again "
+                        f"nearer lock to narrow them.]"
+                    )
 
         others = sorted(by_id, key=lambda player_id: label(player_id).lower())
 
@@ -437,6 +466,49 @@ def _availability_controls(projected, config, slate_id: int):
         locks |= set(locked)
 
     return locks, bans
+
+
+def _solve(projected, config, settings, count: int):
+    """Build lineups, loosening the batting order rather than failing.
+
+    A consecutive block has to be rosterable, and sometimes it is not:
+    DraftKings' baseball roster takes one catcher, one of each infield
+    spot and three outfielders, so a run of four hitters that happens to
+    contain two shortstops cannot be built. Insisting would hand back
+    nothing, which reads as the tool being broken rather than as one
+    constraint being impossible.
+
+    So it is tried strictly first and relaxed only if that fails, and
+    the relaxation is said out loud -- a lineup that quietly stopped
+    obeying a rule you asked for is worse than one that never obeyed it.
+    """
+
+    try:
+        return optimize_lineups(projected, config, settings, count=count)
+    except InfeasibleLineup:
+        pass
+
+    relaxed = dataclasses.replace(
+        settings,
+        stacks=tuple(
+            dataclasses.replace(stack, consecutive=False)
+            for stack in settings.stacks
+        ),
+    )
+
+    if relaxed.stacks == settings.stacks:
+        raise
+
+    lineups = optimize_lineups(projected, config, relaxed, count=count)
+
+    st.warning(
+        "No lineup exists with the stack as a block of the batting order — "
+        "the run of hitters it would need cannot fill the roster slots. "
+        "Built without that requirement instead; the stacks below are from "
+        "one team but not consecutive.",
+        icon="⚠️",
+    )
+    return lineups
 
 
 def main() -> None:
@@ -516,6 +588,18 @@ def main() -> None:
             )
             max_exposure = st.slider("Max exposure", 0.05, 1.0, 1.0 if lineup_count == 1 else 0.4)
             min_unique = st.number_input("Minimum unique players", 1, 5, 1 if mode == "cash" else 2)
+            consecutive = st.checkbox(
+                "Stack consecutive batting order",
+                value=True,
+                help=(
+                    "Require a team stack to be a block of the order -- the "
+                    "2, 3, 4 and 5 hitters rather than any four. One big "
+                    "inning pays a block at once, which is the point of "
+                    "stacking; the same four scattered through the order need "
+                    "four separate innings to go right. Ignored for teams "
+                    "whose lineup has not been posted."
+                ),
+            )
 
         build = st.button("Build lineups", type="primary", use_container_width=True)
 
@@ -595,6 +679,12 @@ def main() -> None:
     settings = gpp_settings(config, lineup_count) if mode == "gpp" else cash_settings(config)
     settings.locks = frozenset(locks)
     settings.bans = frozenset(bans)
+    if consecutive:
+        settings.stacks = tuple(
+            dataclasses.replace(stack, consecutive=True)
+            if stack.kind == "team" else stack
+            for stack in settings.stacks
+        )
     settings.ceiling_weight = ceiling_weight
     settings.ownership_penalty = ownership_penalty
     settings.max_exposure = max_exposure
@@ -614,7 +704,7 @@ def main() -> None:
     with lineups_tab:
         if build:
             with st.spinner(f"Solving {lineup_count} lineup(s)…"):
-                lineups = optimize_lineups(projected, config, settings, count=int(lineup_count))
+                lineups = _solve(projected, config, settings, int(lineup_count))
             st.session_state["lineups"] = lineups
             st.session_state["build_attempted"] = True
             for lineup in lineups:
