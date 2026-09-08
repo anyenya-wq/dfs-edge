@@ -281,3 +281,66 @@ def test_multi_lineup_build_stops_early_rather_than_raising():
     lineups = optimize_lineups(_pool(config, games=2), config, settings, count=50)
 
     assert 0 < len(lineups) < 50
+
+
+# ----------------------------------------------------------------------
+# The team cap counts only the positions the site says it counts
+# ----------------------------------------------------------------------
+
+
+def _is_pitcher(player) -> bool:
+    return any(position in ("P", "SP", "RP") for position in player.positions)
+
+
+def test_a_five_hitter_stack_may_also_roster_that_team_s_pitcher():
+    """DraftKings caps *hitters* at five from one team, not players.
+
+    The lineup this allows is a real construction -- five bats and the
+    pitcher opposing them is self-defeating, but five bats and their own
+    pitcher is not, and it was previously impossible to build.
+    """
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+
+    # Make one team's hitters and one of its pitchers overwhelmingly the
+    # best available, so the optimizer wants six of them.
+    for player in pool:
+        player["projected_points"] = 60.0 if player["team"] == "AAA" else 1.0
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+    rostered = [p for p in lineup.players if p.team == "AAA"]
+    hitters = [p for p in rostered if not _is_pitcher(p)]
+
+    assert len(hitters) <= 5
+    assert len(rostered) > 5, "the pitcher should not count against the hitter cap"
+
+
+def test_the_hitter_cap_itself_still_binds():
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+
+    for player in pool:
+        player["projected_points"] = 60.0 if player["team"] == "AAA" else 1.0
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+    hitters = [
+        p for p in lineup.players
+        if p.team == "AAA" and not _is_pitcher(p)
+    ]
+
+    assert len(hitters) == 5
+
+
+def test_a_sport_with_no_exclusion_caps_every_player():
+    """FanDuel NFL caps four players from a team, with no carve-out."""
+
+    config = get_config("NFL", "FD")
+    pool = _pool(config)
+
+    for player in pool:
+        player["projected_points"] = 60.0 if player["team"] == "AAA" else 1.0
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+
+    assert sum(1 for p in lineup.players if p.team == "AAA") <= 4

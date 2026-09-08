@@ -117,9 +117,12 @@ DK_MLB = SportConfig(
     ),
     scoring=_DK_HITTING,
     opportunity_stat="plate_appearances",
-    # Five hitters from one team is the documented DraftKings ceiling,
-    # which is what makes the five-man stack the maximum legal shape.
+    # "Lineups must have no more than 5 hitters from any one team",
+    # read from DraftKings' own MLB Classic rules. Hitters, not
+    # players: a five-man stack alongside that team's own pitcher is a
+    # legal lineup, so the pitcher is excluded from the count.
     max_per_team=5,
+    team_cap_excludes=("P", "SP", "RP"),
     min_games=2,
     stack_shapes=_STACKS,
     alt_scoring_positions=("P", "SP", "RP"),
@@ -127,6 +130,9 @@ DK_MLB = SportConfig(
     # Derived on both sites so the two are scored from identical lines.
     # DraftKings' table simply has no key for it, so it pays nothing.
     derived=(_QUALITY_START,),
+    # Both tables, the cap, the roster and the team limit read from
+    # DraftKings' published MLB Classic rules.
+    rules_verified=True,
 )
 
 FD_MLB = SportConfig(

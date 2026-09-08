@@ -151,6 +151,11 @@ class SportConfig:
     # span multiple games, which prevents a lineup from riding one
     # blowout. None means the site imposes no limit.
     max_per_team: int | None = None
+    # Positions that do not count toward `max_per_team`. DraftKings caps
+    # *hitters* from one team at five, not players: a five-man stack
+    # alongside that same team's pitcher is a legal lineup, and counting
+    # the pitcher would rule it out.
+    team_cap_excludes: tuple[str, ...] = ()
     min_games: int = 2
     stack_shapes: tuple[StackRule, ...] = ()
     # Positions whose scoring table differs from the rest of the sport
@@ -173,6 +178,14 @@ class SportConfig:
     @property
     def key(self) -> str:
         return f"{self.sport}:{self.site}"
+
+    def counts_toward_team_cap(self, positions: Sequence[str]) -> bool:
+        """Whether a player at `positions` counts against the team limit."""
+
+        if not self.team_cap_excludes:
+            return True
+
+        return not any(position in self.team_cap_excludes for position in positions)
 
     def scoring_table(self, positions: Sequence[str]) -> Mapping[str, float]:
         """The scoring table that applies to a player at `positions`."""

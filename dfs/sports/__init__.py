@@ -44,9 +44,10 @@ VERIFICATION_NOTES: dict[str, str] = {
                "not been checked against FanDuel's own rules."),
     "NBA:DK": "Confirm double-double 1.5 / triple-double 3.0 and the 2.0 steal-block rate.",
     "NBA:FD": "Confirm the 3.0 steal-block rate and that no double bonus is paid.",
-    "MLB:DK": ("Scoring corroborated against independent sources, but not read "
-               "from DraftKings' own rules page. Still unconfirmed: the "
-               "five-hitter-per-team cap."),
+    "MLB:DK": ("Read from DraftKings' published MLB Classic rules: both "
+               "scoring tables, the $50,000 cap, the ten-man roster, and the "
+               "five-hitter-per-team limit, which counts hitters and not "
+               "pitchers."),
     "MLB:FD": ("Scoring read from FanDuel's own Rules & Scoring tab and now "
                "matches it line for line. The tab does not show roster "
                "limits, so the $35,000 cap and the four-per-team maximum are "

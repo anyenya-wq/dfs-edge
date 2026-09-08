@@ -151,3 +151,71 @@ def test_draftkings_mlb_pays_no_quality_start():
     """The two pitcher tables differ here, and it is worth four points."""
 
     assert "quality_start" not in get_config("MLB", "DK").alt_scoring
+
+
+# ----------------------------------------------------------------------
+# MLB:DK, read from DraftKings' published MLB Classic rules
+# ----------------------------------------------------------------------
+
+
+DK_MLB_HITTING = {
+    "single": 3, "double": 5, "triple": 8, "hr": 10,
+    "rbi": 2, "run": 2, "bb": 2, "hbp": 2, "sb": 5,
+}
+
+DK_MLB_PITCHING = {
+    "ip": 2.25, "k": 2, "win": 4, "er": -2,
+    "hit_allowed": -0.6, "bb_allowed": -0.6, "hbp_allowed": -0.6,
+    "complete_game": 2.5, "complete_game_shutout": 2.5, "no_hitter": 5,
+}
+
+
+def test_draftkings_mlb_matches_the_published_tables():
+    config = get_config("MLB", "DK")
+
+    for stat, points in DK_MLB_HITTING.items():
+        assert config.scoring[stat] == points, stat
+    for stat, points in DK_MLB_PITCHING.items():
+        assert config.alt_scoring[stat] == points, stat
+
+
+def test_an_inning_pitched_is_three_quarters_of_a_point_per_out():
+    """The rules give both forms: 2.25 per inning, 0.75 per out."""
+
+    config = get_config("MLB", "DK")
+
+    assert config.score_stat_line({"ip": 1.0}, ["P"]) == 2.25
+    assert config.score_stat_line({"ip": 1 / 3}, ["P"]) == pytest.approx(0.75)
+
+
+def test_draftkings_mlb_roster_and_cap_match_the_published_rules():
+    config = get_config("MLB", "DK")
+
+    assert config.salary_cap == 50_000
+    assert config.roster_size == 10
+    assert config.min_games == 2
+
+    slots = {slot.name: slot.count for slot in config.roster}
+    assert slots == {"P": 2, "C": 1, "1B": 1, "2B": 1, "3B": 1, "SS": 1, "OF": 3}
+
+
+def test_the_team_limit_counts_hitters_and_not_pitchers():
+    """"No more than 5 hitters from any one team" -- hitters.
+
+    A five-man stack alongside that same team's pitcher is six players
+    from one team and a legal lineup. Counting the pitcher would rule it
+    out.
+    """
+
+    config = get_config("MLB", "DK")
+
+    assert config.max_per_team == 5
+    assert config.counts_toward_team_cap(["OF"])
+    assert config.counts_toward_team_cap(["C", "1B"])
+    assert not config.counts_toward_team_cap(["P"])
+    assert not config.counts_toward_team_cap(["SP"])
+
+
+def test_a_sport_without_an_exclusion_counts_everyone():
+    assert get_config("NFL", "FD").counts_toward_team_cap(["QB"])
+    assert get_config("NBA", "DK").counts_toward_team_cap(["PG"])

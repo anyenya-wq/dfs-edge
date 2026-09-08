@@ -323,8 +323,14 @@ def optimize_lineup(
     max_per_team = settings.resolved_max_per_team(config)
     teams: dict[str, list[pulp.LpVariable]] = {}
     for player_key, variable in used.items():
-        team = (by_id[player_key].get("team") or "").upper()
-        if team:
+        player = by_id[player_key]
+        team = (player.get("team") or "").upper()
+        # Some sites cap only part of the roster. DraftKings' MLB limit
+        # is five hitters from one team, so a pitcher from that team
+        # does not count against it.
+        if team and config.counts_toward_team_cap(
+            [str(position).upper() for position in player.get("positions") or []]
+        ):
             teams.setdefault(team, []).append(variable)
 
     if max_per_team:

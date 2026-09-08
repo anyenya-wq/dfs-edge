@@ -63,7 +63,7 @@ half-and-half blend, with the weight chosen on 2023, is worth **+0.088
 on held-out 2024**. A defence projected from its own history is worth
 nothing; the matchup is the projection.
 
-## 1b. Scoring rules — one pair now verified at source
+## 1b. Scoring rules — both MLB pairs now verified at source
 
 **MLB:FD is read from FanDuel's own Rules & Scoring tab.** Every hitting
 line already matched. The pitching table was missing the quality start
@@ -75,9 +75,16 @@ and earned runs, so history collected before the rule existed scores
 correctly without a re-download. That is the pattern to follow for any
 scoring line added later.
 
-Still unverified at source: both NFL pairs, both NBA pairs, MLB:DK, both
-NHL pairs, and both EPL pairs. Each carries a note in the app naming
-what specifically is unchecked.
+**MLB:DK is read from DraftKings' published MLB Classic rules.** Both
+tables matched, as did the $50,000 cap and the ten-man roster. The team
+limit did not: the rule is "no more than 5 *hitters* from any one team",
+and the optimizer was counting every player, so a five-man stack
+alongside that team's own pitcher -- a legal lineup -- could not be
+built. Caps now name the positions they exclude.
+
+Still unverified at source: both NFL pairs, both NBA pairs, both NHL
+pairs, and both EPL pairs. Each carries a note in the app naming what
+specifically is unchecked.
 
 ## 2. Hosting — done
 
