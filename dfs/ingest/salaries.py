@@ -356,7 +356,14 @@ def expand_roster_eligibility(pool: list[dict[str, Any]], config: SportConfig) -
 
     for player in pool:
         listed = set(player.get("roster_positions") or player.get("positions") or [])
-        base = set(player.get("positions") or [])
+
+        # Seeded from what the site published for *this* slate, not
+        # from the player's positions. Those are stored once per player
+        # and overwritten by whichever file was uploaded last, so a
+        # FanDuel MLB file was widening DraftKings eligibility: 116 of
+        # 942 players in one real pool, and DraftKings rejects the
+        # lineup at upload with "not in a valid roster position".
+        base = set(player.get("roster_positions") or player.get("positions") or [])
 
         for slot in config.roster:
             if slot.accepts(sorted(base)):

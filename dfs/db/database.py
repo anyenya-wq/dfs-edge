@@ -77,7 +77,17 @@ class Database:
     # database holds the collected history and every stored slate, so it
     # is migrated rather than recreated.
     ADDED_COLUMNS = {
-        "salaries": {"starting": "TEXT", "batting_order": "INTEGER"},
+        # `positions` is per-slate because a player's positions are a
+        # property of the slate and not of the player: the two sites
+        # list him differently, and either relists him week to week.
+        # The `players` table keeps one set for everyone, last upload
+        # wins, so a FanDuel file was silently rewriting what
+        # DraftKings had said about the same man.
+        "salaries": {
+            "starting": "TEXT",
+            "batting_order": "INTEGER",
+            "positions": "TEXT",
+        },
     }
 
     def _columns(self, table: str) -> set[str]:
@@ -183,6 +193,11 @@ class Database:
                     -- announced; both are blank until then.
                     starting TEXT,
                     batting_order INTEGER,
+                    -- This slate's positions. Not the player's: the two
+                    -- sites list him differently and either relists him
+                    -- week to week, so one set per player is wrong for
+                    -- every slate but the last one uploaded.
+                    positions TEXT,
                     UNIQUE (slate_id, player_id),
                     FOREIGN KEY (slate_id) REFERENCES slates(id),
                     FOREIGN KEY (player_id) REFERENCES players(player_id)
@@ -427,12 +442,13 @@ class Database:
                     INSERT INTO salaries (
                         slate_id, player_id, salary, roster_positions,
                         team, opponent, home, game_id, site_avg_points,
-                        injury_status, starting, batting_order
+                        injury_status, starting, batting_order, positions
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (slate_id, player_id) DO UPDATE SET
                         salary = excluded.salary,
                         roster_positions = excluded.roster_positions,
+                        positions = excluded.positions,
                         team = excluded.team,
                         opponent = excluded.opponent,
                         home = excluded.home,
@@ -455,6 +471,7 @@ class Database:
                         row.get("injury_status"),
                         row.get("starting"),
                         row.get("batting_order"),
+                        json.dumps(list(row.get("positions", []))),
                     ),
                 )
                 count += 1
@@ -695,7 +712,10 @@ class Database:
                 s.player_id, s.salary, s.roster_positions, s.team, s.opponent,
                 s.home, s.game_id, s.site_avg_points, s.injury_status,
                 s.starting, s.batting_order,
-                p.name, p.positions,
+                -- This slate's positions first; the players table only
+                -- for rows written before the column existed.
+                COALESCE(s.positions, p.positions) AS positions,
+                p.name,
                 -- The site's own player ids. Needed to export a lineup
                 -- back for bulk upload: both sites match on their id,
                 -- not on a name.
@@ -1168,7 +1188,8 @@ class Database:
         query = """
             SELECT
                 sl.sport, sl.site, sl.slate_date, pr.model,
-                pr.player_id, p.name, p.positions,
+                pr.player_id, p.name,
+                COALESCE(s.positions, p.positions) AS positions,
                 pr.projected_points, pr.floor, pr.ceiling, pr.stdev,
                 pr.projected_ownership,
                 a.actual_points, a.actual_ownership,

@@ -166,6 +166,32 @@ projection count alone, and one MLB pool is most of a thousand
 projections by itself. Slates are counted now, and below five the
 verdict says what the record does and does not establish.
 
+## 1c. Lineups DraftKings rejected
+
+Nine of twenty uploaded lineups came back with "not in a valid roster
+position", every named player a multi-position one.
+
+Positions were stored once per player and overwritten by whichever file
+was uploaded last, so a FanDuel MLB file rewrote what DraftKings had
+said about the same man. Eligibility expansion then read those
+positions and added slots the slate never offered. Measured on the two
+real files: uploading the FanDuel export widened DraftKings eligibility
+for **116 of 942 players** — Oneil Cruz listed at outfield only, given
+shortstop; a catcher given first base and outfield — and DraftKings
+rejects those at upload.
+
+Fixed in two places. Expansion is now seeded from what the site
+published for *this* slate rather than from the player's accumulated
+positions, which repairs slates already stored. And positions are now
+kept per slate, so the two sites stop overwriting each other at all;
+that one also corrects the position column on screen and the
+by-position calibration breakdown, both of which had been reading
+whichever file was uploaded most recently.
+
+Checked by building twenty lineups from the real DraftKings pool with
+the FanDuel file loaded alongside, then validating every placement
+against the export's own Roster Position column: zero invalid.
+
 ## 2. Hosting — done
 
 The database is addressed by URL, so SQLite runs locally and PostgreSQL

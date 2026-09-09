@@ -702,3 +702,33 @@ def test_an_unlocked_projection_is_still_replaced(database):
     database.save_actual(slate, {"player_id": "p0", "actual_points": 5.0})
 
     assert database.resolved_projections("MLB", "DK")[0]["projected_points"] == 7.0
+
+
+def test_positions_are_stored_per_slate(database):
+    """Two sites list the same player differently, and the newer upload
+    was overwriting the older one for every slate at once.
+
+    DraftKings had him at second base; FanDuel lists him in the
+    outfield as well. Uploading FanDuel must not change what the
+    DraftKings pool says, because DraftKings will reject a lineup that
+    plays him there.
+    """
+
+    dk = database.upsert_slate("MLB", "DK", "2026-09-08")
+    database.save_salaries(dk, [{
+        "player_id": "mlb:cruz", "name": "Oneil Cruz", "sport": "MLB",
+        "positions": ["2B"], "roster_positions": ["2B"],
+        "team": "PIT", "opponent": "CHC", "salary": 4600,
+        "site_avg_points": 8.0, "game_id": "PIT@CHC",
+    }])
+
+    fd = database.upsert_slate("MLB", "FD", "2026-09-09")
+    database.save_salaries(fd, [{
+        "player_id": "mlb:cruz", "name": "Oneil Cruz", "sport": "MLB",
+        "positions": ["2B", "OF"], "roster_positions": ["2B", "OF"],
+        "team": "PIT", "opponent": "CHC", "salary": 3500,
+        "site_avg_points": 9.0, "game_id": "PIT@CHC",
+    }])
+
+    assert database.player_pool(dk)[0]["positions"] == ["2B"]
+    assert database.player_pool(fd)[0]["positions"] == ["2B", "OF"]
