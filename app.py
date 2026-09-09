@@ -270,6 +270,26 @@ def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | Non
     if default not in labels:
         default = matching if matching in labels else slates[0]["id"]
 
+    # The sidebar was just moved. Legal to write here because the
+    # picker below has not been drawn yet this run. Prefer a slate on
+    # the chosen date, then any slate for that sport and site.
+    if st.session_state.pop("sidebar_steered", False):
+        steered = matching if matching in labels else next(
+            (row["id"] for row in slates
+             if row["sport"] == sport and row["site"] == site),
+            None,
+        )
+        if steered is None:
+            st.session_state["slate_notice"] = (
+                f"No {sport} slate from "
+                f"{'DraftKings' if site == 'DK' else 'FanDuel'} has been "
+                "uploaded, so the board is still showing "
+                f"{labels[default]}. Upload that file to switch to it."
+            )
+        else:
+            st.session_state["slate_choice"] = steered
+            default = steered
+
     ids = list(labels)
     choice = st.selectbox(
         "Slate",
@@ -648,10 +668,30 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Slate")
-        sport = st.selectbox("Sport", SPORTS)
-        site = st.selectbox("Site", SITES, format_func=lambda s: {"DK": "DraftKings", "FD": "FanDuel"}[s])
-        slate_date = st.date_input("Slate date", dt.date.today()).isoformat()
-        st.session_state["slate_date"] = slate_date
+
+        # Applied before the widgets are drawn, because Streamlit
+        # refuses to change a widget's state after it exists. Choosing a
+        # slate below stashes the values here and reruns, which is what
+        # keeps these two agreeing with what is actually on screen.
+        for field in ("sport", "site"):
+            pending = st.session_state.pop(f"pending_{field}", None)
+            if pending is not None:
+                st.session_state[f"sidebar_{field}"] = pending
+
+        sport = st.selectbox("Sport", SPORTS, key="sidebar_sport")
+        site = st.selectbox(
+            "Site", SITES, key="sidebar_site",
+            format_func=lambda s: {"DK": "DraftKings", "FD": "FanDuel"}[s],
+        )
+
+        # A change here is the user steering the board, so it has to
+        # move the slate picker. Without this the picker would win every
+        # time and these two would snap back the moment they were
+        # touched -- a control that refuses to change.
+        previous = st.session_state.get("last_sidebar_pick")
+        if previous is not None and previous != (sport, site):
+            st.session_state["sidebar_steered"] = True
+        st.session_state["last_sidebar_pick"] = (sport, site)
 
         config = get_config(sport, site)
 
@@ -676,8 +716,25 @@ def main() -> None:
             ),
         )
 
+        # Only a fallback, and labelled as one. DraftKings writes a date
+        # into its export and it is read from there; FanDuel writes
+        # none. Kept here rather than under "Slate" because it does not
+        # describe the slate on screen -- it dates a file that arrives
+        # without one, and a date sitting under the sport that
+        # disagreed with the slate being shown read as a contradiction.
+        upload_date = st.date_input(
+            "Date for files without one",
+            dt.date.today(),
+            help=(
+                "FanDuel's export carries no date. Files that do not name "
+                "one are filed under this, and can be corrected afterwards "
+                "with Games are played on."
+            ),
+        ).isoformat()
+        st.session_state["slate_date"] = upload_date
+
         if uploads:
-            _ingest_uploads(database, uploads, slate_date)
+            _ingest_uploads(database, uploads, upload_date)
 
         st.divider()
         _ensure_history(database, sport)
@@ -766,12 +823,19 @@ def main() -> None:
             icon="⚠️",
         )
 
+    # Stashed rather than shown where it is raised, because the run
+    # that raises it ends in a rerun and a rerun throws away everything
+    # already rendered.
+    notice = st.session_state.pop("slate_notice", None)
+    if notice:
+        st.info(notice, icon="\u2139\ufe0f")
+
     # Read from storage, not from the uploader. Uploading writes the
     # slate; showing one reads it back. Keeping those separate is what
     # lets several sports be loaded at once and switched between, and
     # what stops a rerun -- which always empties the uploader -- from
     # looking like there is nothing to show.
-    slate_id = _choose_slate(database, sport, site, slate_date)
+    slate_id = _choose_slate(database, sport, site, upload_date)
 
     if slate_id is None:
         _show_getting_started(config)
@@ -779,6 +843,15 @@ def main() -> None:
         return
 
     stored = database.slate(slate_id)
+
+    # The sidebar describes the slate on screen, so it follows the
+    # picker rather than sitting beside it disagreeing. One extra rerun
+    # when you switch slates, and none afterwards.
+    if (stored["sport"], stored["site"]) != (sport, site):
+        st.session_state["pending_sport"] = stored["sport"]
+        st.session_state["pending_site"] = stored["site"]
+        st.rerun()
+
     slate_date = _slate_date_control(database, stored)
     sport, site = stored["sport"], stored["site"]
     config = get_config(sport, site)
