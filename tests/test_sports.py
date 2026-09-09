@@ -24,7 +24,8 @@ def test_unknown_pair_names_what_is_available():
 def test_roster_is_internally_consistent(key):
     config = CONFIGS[key]
     assert config.roster_size == sum(slot.count for slot in config.roster)
-    assert 8 <= config.roster_size <= 10
+    # FanDuel soccer is seven; every other pair is eight to ten.
+    assert 7 <= config.roster_size <= 10
     assert config.salary_cap > 0
     # Every slot must accept at least one position, or it can never fill.
     for slot in config.roster:
@@ -122,14 +123,17 @@ def test_unknown_stat_keys_are_ignored():
     assert clean == noisy
 
 
-def test_soccer_tables_are_flagged_unverified():
-    """The soccer numbers are the least certain; the flag must say so."""
+def test_soccer_tables_have_been_read_from_the_sites():
+    """This asserted the opposite until the rules pages were read.
 
-    from dfs.sports import VERIFICATION_NOTES
+    Soccer was the least certain of the five and the flag said so.
+    Both tables are now transcribed from source -- DraftKings' Classic
+    Soccer rules and a FanDuel contest's Rules & Scoring tab -- so the
+    flag has to move with them or it stops meaning anything.
+    """
 
     for key in ("EPL:DK", "EPL:FD"):
-        assert "UNVERIFIED" in VERIFICATION_NOTES[key]
-        assert not CONFIGS[key].rules_verified
+        assert CONFIGS[key].rules_verified
 
 
 # ----------------------------------------------------------------------
@@ -316,3 +320,117 @@ def test_nfl_pays_all_three_yardage_bonuses(site):
         ("rush_yd", 100): 3.0,
         ("rec_yd", 100): 3.0,
     }
+
+
+# ----------------------------------------------------------------------
+# The soccer tables, as published
+# ----------------------------------------------------------------------
+#
+# DraftKings publishes one table headed "All Players (GK,D,M,F)" with
+# two lines restricted inside it, plus a goalkeeper table. FanDuel
+# publishes three. Both come to the same three-way split, so both are
+# written out that way and asserted whole.
+
+DK_SOCCER_OUTFIELD = {
+    "goal": 10.0, "assist": 6.0, "shot": 1.0, "shot_on_goal": 1.0,
+    "cross": 0.7, "created_chance": 1.0, "accurate_pass": 0.02,
+    "fouls_drawn": 1.0, "fouls_conceded": -0.5, "tackle_won": 1.0,
+    "interception": 0.5, "yellow_card": -1.5, "red_card": -3.0,
+    "shootout_goal": 1.5, "shootout_miss": -1.0,
+}
+
+DK_SOCCER_KEEPER_EXTRAS = {
+    "save": 2.0, "goal_allowed": -2.0, "clean_sheet": 5.0,
+    "win": 5.0, "penalty_save": 3.0, "shootout_save": 1.5,
+}
+
+FD_SOCCER_OUTFIELD = {
+    "goal": 15.0, "assist": 7.0, "shot": 1.0, "shot_on_goal": 4.0,
+    "cross": 0.5, "created_chance": 2.5, "blocked_shot": 1.6,
+    "clearance": 1.6, "interception": 1.6, "tackle_won": 1.6,
+    "fouls_drawn": 1.0, "penalty_miss": -3.0,
+    "yellow_card": -1.0, "red_card": -3.0,
+}
+
+FD_SOCCER_KEEPER = {
+    "clean_sheet": 8.0, "goal_allowed": -2.5, "save": 2.5,
+    "penalty_save": 2.5, "win": 6.0,
+}
+
+
+def test_draftkings_soccer_tables_match_what_the_site_publishes():
+    config = get_config("EPL", "DK")
+
+    assert config.scoring_table(["M"]) == DK_SOCCER_OUTFIELD
+    assert config.scoring_table(["F"]) == DK_SOCCER_OUTFIELD
+    assert config.scoring_table(["D"]) == {**DK_SOCCER_OUTFIELD, "clean_sheet": 3.0}
+    assert config.scoring_table(["GK"]) == {
+        **{k: v for k, v in DK_SOCCER_OUTFIELD.items() if k != "interception"},
+        **DK_SOCCER_KEEPER_EXTRAS,
+    }
+
+
+def test_fanduel_soccer_tables_match_what_the_site_publishes():
+    config = get_config("EPL", "FD")
+
+    assert config.scoring_table(["M"]) == FD_SOCCER_OUTFIELD
+    assert config.scoring_table(["F"]) == FD_SOCCER_OUTFIELD
+    assert config.scoring_table(["D"]) == {
+        **FD_SOCCER_OUTFIELD, "clean_sheet": 5.0, "goal_allowed": -0.6,
+    }
+    assert config.scoring_table(["GK"]) == FD_SOCCER_KEEPER
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_a_forward_is_never_paid_a_clean_sheet(site):
+    """The whole reason soccer needs three tables rather than two.
+
+    A clean sheet is 3 to 8 points depending on site and position, and
+    it lands on the one stat every collector reports for every player
+    on the team. Paid to a forward it is not a rounding error -- it is
+    most of a cheap striker's projection, invented.
+    """
+
+    config = get_config("EPL", site)
+    line = {"clean_sheet": 1, "minutes": 90}
+
+    assert score_stat_line(line, ["F"], config) == 0.0
+    assert score_stat_line(line, ["M"], config) == 0.0
+    assert score_stat_line(line, ["D"], config) > 0.0
+    assert score_stat_line(line, ["GK"], config) > 0.0
+
+
+def test_a_draftkings_shot_on_target_is_worth_two():
+    """DraftKings' own note: a shot on goal counts as a shot as well.
+
+    Which means the collector has to report total shots and not shots
+    that missed, or every attacker is short a point per attempt.
+    """
+
+    config = get_config("EPL", "DK")
+
+    assert score_stat_line({"shot": 1, "shot_on_goal": 1}, ["F"], config) == 2.0
+
+
+def test_neither_site_charges_for_an_own_goal():
+    """Both tables used to. Neither published table has the line, and
+    DraftKings' notes mention own goals only as something that counts
+    against a keeper's goals-against and clean sheet -- never as a
+    penalty against the scorer."""
+
+    for site in ("DK", "FD"):
+        config = get_config("EPL", site)
+        for position in ("F", "M", "D", "GK"):
+            assert "own_goal" not in config.scoring_table([position])
+
+
+def test_draftkings_soccer_wants_three_teams_and_caps_none():
+    """A distinct-teams floor is not a per-team cap, and the config
+    carried the cap it does not have while missing the floor it does.
+    Six players from one side is a legal DraftKings soccer lineup."""
+
+    config = get_config("EPL", "DK")
+
+    assert config.min_teams == 3
+    assert config.max_per_team is None
+    assert config.roster_size == 8

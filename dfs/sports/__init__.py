@@ -57,8 +57,17 @@ VERIFICATION_NOTES: dict[str, str] = {
                "still unconfirmed."),
     "NHL:DK": "Confirm the three skater step bonuses at 3 goals / 5 shots / 3 blocks.",
     "NHL:FD": "Confirm goalie save 0.6 and goal-against -3.0.",
-    "EPL:DK": "UNVERIFIED. Peripheral rates (cross, tackle, interception) are low confidence.",
-    "EPL:FD": "UNVERIFIED, and confirm FanDuel still runs EPL contests in your market.",
+    "EPL:DK": ("Read from DraftKings' published Classic Soccer rules: the "
+               "scoring table and its position restrictions, the $50,000 cap, "
+               "the eight-man roster, three teams and two matches. The same "
+               "rules cover every competition DraftKings runs -- Premier "
+               "League, MLS, Champions League -- but the history collector "
+               "reads a Premier League feed, so a non-league slate scores "
+               "correctly and projects off no history at all."),
+    "EPL:FD": ("Scoring read from a FanDuel contest's Rules & Scoring tab, "
+               "all three position tables, and the roster and $100 cap from "
+               "the entry screen. Still assumed: the four-per-team limit, "
+               "which neither showed."),
 }
 
 

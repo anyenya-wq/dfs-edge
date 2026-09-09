@@ -108,6 +108,23 @@ class TieredScore:
 
 
 @dataclasses.dataclass(frozen=True)
+class PositionScoring:
+    """A scoring table that applies only to players at `positions`.
+
+    Most sports need one exception -- a pitcher, a goalie, a defence --
+    and `SportConfig.alt_scoring` says that in one line. Soccer needs
+    two: FanDuel scores forwards and midfielders, defenders, and
+    goalkeepers from three separate tables, and the difference is not
+    cosmetic. A defender's clean sheet is most of a defender's floor,
+    and paying it to a forward, or failing to pay it to a defender,
+    misprices the position rather than nudging it.
+    """
+
+    positions: tuple[str, ...]
+    table: Mapping[str, float]
+
+
+@dataclasses.dataclass(frozen=True)
 class StackRule:
     """A correlation shape worth enforcing during lineup construction.
 
@@ -157,11 +174,22 @@ class SportConfig:
     # the pitcher would rule it out.
     team_cap_excludes: tuple[str, ...] = ()
     min_games: int = 2
+    # Distinct teams a lineup must span. Separate from `max_per_team`:
+    # DraftKings soccer requires three different teams among eight
+    # players but caps none of them, so a six-man side is legal and a
+    # two-team lineup is not. A cap cannot express that.
+    min_teams: int = 1
     stack_shapes: tuple[StackRule, ...] = ()
     # Positions whose scoring table differs from the rest of the sport
-    # (pitchers, goalies). Scored from `alt_scoring` when present.
+    # (pitchers, goalies). Scored from `alt_scoring` when present. This
+    # is shorthand for a single `PositionScoring` entry, and is kept
+    # because one exception is the common case; a sport needing more
+    # than one uses the general form below instead. Both go through the
+    # same lookup, so there is one rule for which table wins.
     alt_scoring_positions: tuple[str, ...] = ()
     alt_scoring: Mapping[str, float] = dataclasses.field(default_factory=dict)
+    # Checked in order, first match wins, ahead of the pair above.
+    position_scoring: tuple[PositionScoring, ...] = ()
     # Step functions over a single stat, scored on top of the linear
     # table. Only football uses these, for points allowed.
     tiers: tuple[TieredScore, ...] = ()
@@ -187,11 +215,23 @@ class SportConfig:
 
         return not any(position in self.team_cap_excludes for position in positions)
 
+    @property
+    def scoring_tables(self) -> tuple[PositionScoring, ...]:
+        """Every positional exception, in the order they are checked."""
+
+        if not self.alt_scoring_positions:
+            return self.position_scoring
+
+        return self.position_scoring + (
+            PositionScoring(self.alt_scoring_positions, self.alt_scoring),
+        )
+
     def scoring_table(self, positions: Sequence[str]) -> Mapping[str, float]:
         """The scoring table that applies to a player at `positions`."""
 
-        if any(position in self.alt_scoring_positions for position in positions):
-            return self.alt_scoring
+        for entry in self.scoring_tables:
+            if any(position in entry.positions for position in positions):
+                return entry.table
         return self.scoring
 
     def with_derived(self, stats: Mapping[str, float]) -> Mapping[str, float]:

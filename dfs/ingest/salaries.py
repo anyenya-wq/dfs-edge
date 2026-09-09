@@ -171,6 +171,13 @@ def _parse_game_info(raw: str | None, team: str | None) -> dict[str, Any]:
     Both sites write the away team first ("DAL@PHX"), which is the only
     place a salary file records who is at home. Home/away matters to a
     projection and is not recoverable from anything else in the file.
+
+    Except in soccer, where DraftKings writes "LIV vs ATL" -- and means
+    it the other way round, home first. Read with the "@" pattern only,
+    a soccer file yields no matchup at all: no opponent, no game id, and
+    so no minimum-games constraint, silently, because an absent game is
+    not an error anywhere downstream. Checked against a Champions
+    League export, where the home side is first in all four fixtures.
     """
 
     result: dict[str, Any] = {"game_id": None, "opponent": None, "home": None}
@@ -178,10 +185,16 @@ def _parse_game_info(raw: str | None, team: str | None) -> dict[str, Any]:
         return result
 
     match = re.search(r"([A-Za-z]{2,4})\s*@\s*([A-Za-z]{2,4})", str(raw))
-    if not match:
-        return result
+    if match:
+        away, home = match.group(1).upper(), match.group(2).upper()
+    else:
+        match = re.search(r"\b([A-Za-z]{2,4})\s+vs\.?\s+([A-Za-z]{2,4})\b", str(raw), re.I)
+        if not match:
+            return result
+        home, away = match.group(1).upper(), match.group(2).upper()
 
-    away, home = match.group(1).upper(), match.group(2).upper()
+    # Normalised to away@home whichever way the file wrote it, so a
+    # game identifier means the same thing in every sport.
     result["game_id"] = f"{away}@{home}"
 
     if team:

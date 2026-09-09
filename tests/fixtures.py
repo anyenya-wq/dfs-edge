@@ -43,12 +43,25 @@ def make_pool(config: SportConfig, games: int = 4, seed: int = 7) -> list[dict[s
             opponent = home if team == away else away
             for position, count in layout.items():
                 for index in range(count):
-                    salary = generator.randrange(3_000, 11_000, 100)
                     # Scale into each site's cap so a lineup is roughly
                     # affordable regardless of which cap applies.
-                    salary = int(salary * config.salary_cap / 50_000 / config.roster_size * 9)
-                    salary = max(salary, 2_000)
-                    projection = max(salary / 1_000 * 3.0 + generator.uniform(-5, 5), 2.0)
+                    if config.salary_cap >= 10_000:
+                        salary = generator.randrange(3_000, 11_000, 100)
+                        salary = int(
+                            salary * config.salary_cap / 50_000 / config.roster_size * 9
+                        )
+                        salary = max(salary, 2_000)
+                        scale = 1_000.0
+                    else:
+                        # FanDuel prices soccer in dollars: a $100 cap
+                        # and salaries from 5 to 23. A floor of 2,000
+                        # makes that pool unaffordable before the
+                        # optimizer sees it, so the small-cap case is
+                        # drawn relative to the cap instead.
+                        average = config.salary_cap / config.roster_size
+                        salary = max(1, round(average * generator.uniform(0.5, 1.55)))
+                        scale = average / 6.0
+                    projection = max(salary / scale * 3.0 + generator.uniform(-5, 5), 2.0)
                     pool.append(
                         {
                             "player_id": f"{config.sport.lower()}:{team}-{position}-{index}",

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -76,6 +77,40 @@ class Lineup:
             "total_ownership": round(self.total_ownership, 3),
             "players": [dataclasses.asdict(player) for player in self.players],
         }
+
+
+def _safe_name(value: str) -> str:
+    """A pulp variable name. Team and game identifiers carry "@", "."
+    and spaces, and pulp names a constraint after whatever it is given,
+    so anything it cannot use has to go before it gets there."""
+
+    return re.sub(r"[^A-Za-z0-9_]", "_", str(value)) or "x"
+
+
+def _presence_indicators(problem, groups, label: str) -> dict[str, pulp.LpVariable]:
+    """One binary per group, true exactly when the group is rostered.
+
+    Both halves are needed and only one used to be here. Forcing the
+    indicator up (`>= variable`) makes a rostered player switch it on;
+    without the matching ceiling (`<= sum`) the solver may switch an
+    indicator on for a group it rostered nobody from, which is free,
+    and any floor built on the sum is then satisfied by arithmetic
+    rather than by the lineup. That is what had been happening to the
+    minimum-games rule: it had been in the model, and enforcing
+    nothing.
+    """
+
+    indicators: dict[str, pulp.LpVariable] = {}
+
+    for name, variables in groups.items():
+        safe = _safe_name(name)
+        indicator = pulp.LpVariable(f"{label}_{safe}", cat="Binary")
+        indicators[name] = indicator
+        for variable in variables:
+            problem += indicator >= variable, f"{label}_on_{safe}_{id(variable)}"
+        problem += indicator <= pulp.lpSum(variables), f"{label}_off_{safe}"
+
+    return indicators
 
 
 def _eligible_slots(player: Mapping[str, Any], config: SportConfig) -> list[str]:
@@ -399,6 +434,17 @@ def optimize_lineup(
         for team, variables in teams.items():
             problem += pulp.lpSum(variables) <= max_per_team, f"team_cap_{team}"
 
+    # Minimum distinct teams, which is not the same rule as a per-team
+    # cap and cannot be written as one. DraftKings soccer wants three
+    # different sides among eight players and caps none of them: six
+    # from one team is legal, four and four is not. Same indicator
+    # shape as the games floor below.
+    if config.min_teams > 1 and len(teams) >= config.min_teams:
+        problem += (
+            pulp.lpSum(_presence_indicators(problem, teams, "team").values())
+            >= config.min_teams
+        ), "min_teams"
+
     # Minimum distinct games. An indicator per game, forced on by any
     # rostered player from it, then a floor on the sum.
     min_games = settings.resolved_min_games(config)
@@ -409,14 +455,10 @@ def optimize_lineup(
             games.setdefault(str(game), []).append(variable)
 
     if min_games > 1 and len(games) >= min_games:
-        indicators = {}
-        for game, variables in games.items():
-            safe = game.replace("@", "_at_")
-            indicator = pulp.LpVariable(f"game_{safe}", cat="Binary")
-            indicators[game] = indicator
-            for variable in variables:
-                problem += indicator >= variable, f"game_on_{safe}_{id(variable)}"
-        problem += pulp.lpSum(indicators.values()) >= min_games, "min_games"
+        problem += (
+            pulp.lpSum(_presence_indicators(problem, games, "game").values())
+            >= min_games
+        ), "min_games"
 
     if settings.no_opposing_defense:
         _forbid_defense_against_own_offense(problem, used, by_id)

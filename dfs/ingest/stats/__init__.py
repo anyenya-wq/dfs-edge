@@ -37,9 +37,15 @@ PLANNED: dict[str, str] = {}
 # belongs in front of the user rather than in a docstring.
 INCOMPLETE = {
     "EPL": (
-        "The FPL feed has no shots on goal, chances created or crosses, so "
-        "projections read low and are skewed toward defenders. Rankings within "
-        "a position are usable; across positions they are not."
+        "The FPL feed carries ten of the stats the sites pay for and is "
+        "missing eleven -- shots, shots on goal, chances created, "
+        "crosses, accurate passes, interceptions, clearances, blocked shots, "
+        "fouls drawn and conceded, and a goalkeeper's win. Projections "
+        "therefore read low, and the shortfall differs by position and by "
+        "site, so rankings within a position are usable and rankings across "
+        "positions are not. It is also a Premier League feed: a Champions "
+        "League or MLS slate scores by the same rules but loads with no "
+        "history at all."
     ),
 }
 

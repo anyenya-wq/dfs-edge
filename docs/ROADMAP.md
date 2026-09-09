@@ -99,9 +99,40 @@ four-per-team limit remain assumed, and both the app and the CLI now
 print the caveat on a verified table instead of only on an unverified
 one -- which is where two such notes had been sitting unread.
 
-Still unverified at source: both NBA pairs, both NHL pairs, and both
-EPL pairs. Each carries a note in the app naming what specifically is
-unchecked.
+**Both soccer pairs are now read from the sites, along with two real
+Champions League exports.** This was the worst of the five and the
+numbers were only part of it.
+
+Almost every rate was wrong, but three things were wrong in kind. Both
+tables charged 5 to 6 points for an own goal, a penalty neither site
+imposes. Neither site scores soccer from one table: DraftKings pays a
+clean sheet to defenders only and interceptions to everyone but the
+keeper, and FanDuel publishes three separate tables, so scoring needed
+a third table rather than the one exception every other sport gets. And
+FanDuel prices soccer in dollars -- seven players against a $100 cap,
+salaries from $5 to $23 -- where the config had nine players and
+$60,000.
+
+The exports then found what the rules pages could not. A FanDuel soccer
+file was not recognised as soccer at all: it writes FWD/MID/DEF/GK, the
+config knew only F/M/D/GK, and detection matched a third of the players
+and named NFL as the closest guess. DraftKings writes a soccer matchup
+as "LIV vs ATL" rather than "ATL@LIV", so every player in a soccer
+slate arrived with no opponent and no game id -- and an absent game is
+not an error anywhere downstream, so this silently disabled the
+minimum-games rule instead of failing.
+
+That rule turned out not to have worked anywhere. Distinct-game and
+distinct-team floors are built from an indicator per group, and the
+indicator was only forced *up* by a rostered player, never down when
+the group was empty -- so the solver could switch on indicators for
+games it rostered nobody from and satisfy the floor by arithmetic. Made
+to bite, it changes real output: given one game worth twenty times the
+rest, the optimizer used to return a single-game NFL lineup, which
+DraftKings rejects at upload.
+
+Still unverified at source: both NBA pairs and both NHL pairs. Each
+carries a note in the app naming what specifically is unchecked.
 
 ## 2. Hosting — done
 

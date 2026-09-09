@@ -493,13 +493,17 @@ run also found two things the original environment could not: a
 `pytest` entrypoint, and an NHL test that asserted games exist in the
 last five days — true for eight months of the year. What it does *not* have yet:
 
-- **Complete soccer stats.** The EPL collector works, but its feed has no
-  shots on goal, chances created or crosses, and DraftKings pays for all
-  three. Projections therefore read low, and — the part that matters —
-  the shortfall differs by position, so rankings within a position are
-  usable while rankings across positions skew toward defenders. Combined
-  with soccer's scoring tables being unverified, it is much the weakest
-  of the five. The app says so in a banner rather than hiding it.
+- **Complete soccer stats.** Both scoring tables are now read from the
+  sites, so soccer is scored correctly — but the collector's feed carries
+  ten of the stats they pay for and is missing eleven, among them shots,
+  interceptions, clearances, blocked shots, accurate passes and a
+  goalkeeper's win. Projections therefore read low, and — the part that
+  matters — the shortfall differs by position and by site, so rankings
+  within a position are usable while rankings across positions skew
+  toward defenders. It is a *Premier League* feed, too, while both sites
+  run one soccer rule set across every competition: a Champions League or
+  MLS slate scores correctly and projects off no history at all. Much the
+  weakest of the five. The app says so in a banner rather than hiding it.
 - **A defence's own form.** It is worth +0.007 over the baseline, which
   is noise, so the projection leans on the matchup instead (+0.088
   blended). That is the best available from free data, but it means a

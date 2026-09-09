@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import itertools
 
 import pytest
@@ -68,6 +69,31 @@ def test_minimum_games_is_respected():
     games = {player.opponent and tuple(sorted((player.team, player.opponent)))
              for player in lineup.players}
     assert len(games) >= config.min_games
+
+
+def test_minimum_games_survives_one_game_being_the_whole_slate():
+    """The version above passed against a rule that was not enforced.
+
+    Its pool spans four games and no reason to concentrate, so a
+    lineup satisfied the floor by accident. Here one game is made
+    twenty times better than the rest, which is the only condition
+    under which the constraint has to do anything -- and under it, the
+    optimizer used to return a single-game lineup that DraftKings
+    rejects at upload.
+    """
+
+    config = get_config("NFL", "DK")
+    pool = _pool(config)
+    best = pool[0]["game_id"]
+    for player in pool:
+        if player["game_id"] == best:
+            for key in ("projected_points", "ceiling", "floor"):
+                player[key] *= 20
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+    games = {tuple(sorted((player.team, player.opponent))) for player in lineup.players}
+
+    assert len(games) >= config.min_games == 2
 
 
 def test_team_cap_is_respected_where_the_site_imposes_one():
@@ -521,3 +547,52 @@ def test_a_team_with_no_posted_lineup_is_left_under_the_looser_rule():
     lineup = optimize_lineup(pool, config, settings)
 
     assert len(lineup.players) == config.roster_size
+
+
+def test_minimum_distinct_teams_is_respected():
+    """DraftKings soccer wants three different sides among eight.
+
+    Built so an unconstrained solver would not comply: one team's
+    players are made far the best in the pool, so the cheapest way to a
+    high total is to take them all. The floor has to be what stops it,
+    which is also what makes this test bite -- the control below shows
+    the same pool concentrating when the floor is lifted.
+    """
+
+    config = get_config("EPL", "DK")
+    pool = _pool(config)
+    for player in pool:
+        if player["team"] == pool[0]["team"]:
+            player["projected_points"] *= 6
+            player["ceiling"] *= 6
+            player["floor"] *= 6
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+    teams = {player.team for player in lineup.players}
+
+    assert len(teams) >= config.min_teams == 3
+
+
+def test_without_the_floor_the_same_pool_piles_into_one_team():
+    """The control. If this failed, the test above would pass whether
+    or not the constraint existed."""
+
+    config = dataclasses.replace(get_config("EPL", "DK"), min_teams=1)
+    pool = _pool(config)
+    for player in pool:
+        if player["team"] == pool[0]["team"]:
+            player["projected_points"] *= 6
+            player["ceiling"] *= 6
+            player["floor"] *= 6
+
+    lineup = optimize_lineup(pool, config, cash_settings(config))
+    teams = {player.team for player in lineup.players}
+
+    assert len(teams) < 3
+
+
+def test_a_distinct_team_floor_does_not_forbid_a_big_side():
+    """Three teams among eight players leaves room for six from one,
+    which DraftKings permits and a per-team cap would not."""
+
+    assert get_config("EPL", "DK").max_per_team is None

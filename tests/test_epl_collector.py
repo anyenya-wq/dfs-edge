@@ -58,8 +58,8 @@ def test_columns_map_onto_the_scoring_keys():
 def test_the_mapped_line_actually_scores():
     record = _record()
     points = score_stat_line(record["stats"], ["M"], get_config("EPL", "DK"))
-    # goal 10 + assist 6 + two tackles at 0.7
-    assert points == pytest.approx(10 + 6 + 1.4)
+    # goal 10 + assist 6 + two tackles at 1.0
+    assert points == pytest.approx(10 + 6 + 2.0)
 
 
 def test_minutes_are_the_opportunity_term():
@@ -128,13 +128,13 @@ def test_attackers_are_not_paid_for_clean_sheets():
         assert "clean_sheet" not in _record(position=position, clean_sheets="1")["stats"]
 
 
-def test_a_striker_and_a_defender_score_the_same_line_differently():
-    """A conceded goal costs the defender and not the striker.
+def test_draftkings_charges_nobody_but_the_keeper_for_a_conceded_goal():
+    """This file used to assert the opposite, and was wrong.
 
-    Clean sheets are zeroed on both sides so the charge is the only
-    thing that differs -- a fixture conceding two goals while also
-    keeping a clean sheet cannot happen, and would make the comparison
-    measure the +5 rather than the -2.
+    It had a DraftKings defender docked 2 points per goal conceded. He
+    is docked nothing: goals against appear only on the goalkeeper's
+    table. What a conceded goal costs an outfield defender is the clean
+    sheet he would otherwise have had, and nothing more.
     """
 
     config = get_config("EPL", "DK")
@@ -144,7 +144,22 @@ def test_a_striker_and_a_defender_score_the_same_line_differently():
     forward_points = score_stat_line(forward["stats"], ["F"], config)
     defender_points = score_stat_line(defender["stats"], ["D"], config)
 
-    assert forward_points - defender_points == pytest.approx(2.0)
+    assert forward_points == pytest.approx(defender_points)
+
+
+def test_fanduel_does_charge_the_defender_for_a_conceded_goal():
+    """And this is why the rule cannot be shared between the sites. On
+    FanDuel a conceded goal costs a defender 0.6 and a forward
+    nothing, so the same match scores the two positions apart."""
+
+    config = get_config("EPL", "FD")
+    forward = _record(position="FWD", goals_conceded="2", clean_sheets="0")
+    defender = _record(position="DEF", goals_conceded="2", clean_sheets="0")
+
+    forward_points = score_stat_line(forward["stats"], ["F"], config)
+    defender_points = score_stat_line(defender["stats"], ["D"], config)
+
+    assert forward_points - defender_points == pytest.approx(1.2)
 
 
 def test_goalkeeper_saves_are_read():
@@ -155,10 +170,34 @@ def test_goalkeeper_saves_are_read():
 
 # --- the gap ----------------------------------------------------------
 
-def test_the_missing_stats_are_named_rather_than_implied():
-    """The most important fact about soccer here, pinned in a test."""
+def _paid_for() -> set[str]:
+    """Every stat either site pays for, across all its position tables."""
 
-    assert set(MISSING_STATS) == {"shot_on_goal", "created_chance", "cross"}
+    paid: set[str] = set()
+    for site in ("DK", "FD"):
+        config = get_config("EPL", site)
+        paid |= set(config.scoring)
+        for entry in config.scoring_tables:
+            paid |= set(entry.table)
+    return paid
+
+
+def test_the_missing_stats_are_named_rather_than_implied():
+    """The most important fact about soccer here, pinned in a test.
+
+    Derived rather than transcribed, and that is the point: the list
+    said three stats for as long as the scoring tables were guesses.
+    Reading the tables off the sites took it to eleven. Computing the
+    gap here means the next change to either the feed or a scoring
+    table fails this test instead of quietly making the constant a
+    lie.
+    """
+
+    from dfs.ingest.stats.epl import MISSING_SHOOTOUT_STATS
+
+    gap = _paid_for() - set(STAT_COLUMNS.values()) - set(MISSING_SHOOTOUT_STATS)
+
+    assert set(MISSING_STATS) == gap
     for stat in MISSING_STATS:
         assert stat not in STAT_COLUMNS.values()
 
@@ -166,9 +205,26 @@ def test_the_missing_stats_are_named_rather_than_implied():
 def test_the_missing_stats_are_ones_the_site_actually_pays_for():
     """If they were unscored, their absence would not matter."""
 
-    scoring = get_config("EPL", "DK").scoring
+    paid = _paid_for()
     for stat in MISSING_STATS:
-        assert stat in scoring
+        assert stat in paid
+
+
+def test_the_feed_carries_less_than_half_of_what_soccer_scores():
+    """The headline number behind the banner, so it cannot drift
+    unnoticed: ten scored stats present, eleven absent.
+
+    The feed maps eleven columns, but one of them is own goals, which
+    neither site charges for -- so it is collected and then scores
+    nothing.
+    """
+
+    present = _paid_for() & set(STAT_COLUMNS.values())
+
+    assert len(present) == 10
+    assert len(MISSING_STATS) == 11
+    assert "own_goal" in STAT_COLUMNS.values()
+    assert "own_goal" not in _paid_for()
 
 
 def test_the_combined_defensive_stat_is_not_mapped():
@@ -231,3 +287,107 @@ def test_a_real_season_loads_with_all_four_positions(tmp_path):
         )
     }
     assert positions == {'["GK"]', '["D"]', '["M"]', '["F"]'}
+
+
+# ----------------------------------------------------------------------
+# Real exports: a DraftKings and a FanDuel Champions League slate
+# ----------------------------------------------------------------------
+#
+# Written from the two files rather than invented, because every bug
+# below survived a suite full of invented ones. Soccer is where the
+# sites diverge most from their own house style, and each of these was
+# silent: nothing raised, the board just quietly did less.
+
+DK_SOCCER_EXPORT = (
+    "Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev,"
+    "AvgPointsPerGame,Status,Starting\n"
+    "F,Ousmane Dembele (1),Ousmane Dembele,1,F/UTIL,12200,"
+    "PSG vs SLO 09/09/2026 03:00PM ET,PSG,14.7,,\n"
+    "M/F,Ferran Torres (2),Ferran Torres,2,M/F/UTIL,10600,"
+    "PSG vs SLO 09/09/2026 03:00PM ET,PSG,7.3,,\n"
+    "D,Kostas Tsimikas (3),Kostas Tsimikas,3,D/UTIL,6200,"
+    "LIV vs ATL 09/09/2026 03:00PM ET,LIV,5.1,,\n"
+    "GK,Joan Garcia (4),Joan Garcia,4,GK,5500,"
+    "LIV vs ATL 09/09/2026 03:00PM ET,ATL,6.2,,\n"
+)
+
+FD_SOCCER_EXPORT = (
+    "Id,Position,First Name,Nickname,Last Name,FPPG,Played,Salary,Game,Team,"
+    "Opponent,Injury Indicator,Injury Details,Tier,,,Roster Position\n"
+    "1-1,FWD,Raphael,Raphinha,Dias Belloli,29.58,7,23,FEY@BAR,BAR,FEY,,,,,,FWD/MID\n"
+    "1-2,MID,Fermin,Fermin Lopez,Lopez,24.18,11,19,FEY@BAR,BAR,FEY,,,,,,FWD/MID\n"
+    "1-3,DEF,Jules,Jules Kounde,Kounde,12.0,9,14,FEY@BAR,BAR,FEY,,,,,,DEF\n"
+    "1-4,GK,Joan,Joan Garcia,Garcia,11.0,9,14,FEY@BAR,BAR,FEY,,,,,,GK\n"
+)
+
+
+def test_a_fanduel_soccer_file_is_recognised_as_soccer():
+    """It was not. FanDuel writes FWD/MID/DEF/GK and the config knew
+    only F/M/D/GK, so detection matched 34% of players, named NFL as
+    the closest guess and returned no sport at all."""
+
+    from dfs.ingest.detect import detect
+
+    detected = detect(FD_SOCCER_EXPORT)
+
+    assert detected.site == "FD"
+    assert detected.sport == "EPL"
+    assert detected.coverage == 1.0
+
+
+def test_draftkings_soccer_records_the_matchup():
+    """DraftKings writes "LIV vs ATL" in soccer and "ATL@LIV"
+    everywhere else. Only the second was read, so a soccer slate
+    arrived with no opponent and no game id on any player -- which
+    silently disabled the minimum-games rule, since a lineup spanning
+    no known games cannot be found to span too few.
+    """
+
+    from dfs.ingest.salaries import parse_draftkings
+
+    players = {p["name"]: p for p in parse_draftkings(DK_SOCCER_EXPORT, "EPL")}
+
+    assert all(p["opponent"] for p in players.values())
+    assert players["Ousmane Dembele"]["game_id"] == "SLO@PSG"
+    assert players["Kostas Tsimikas"]["game_id"] == "ATL@LIV"
+
+
+def test_draftkings_soccer_reads_home_first():
+    """The opposite order from "@", and getting it backwards would not
+    fail anything -- it would just put every side on the wrong end of
+    home advantage."""
+
+    from dfs.ingest.salaries import parse_draftkings
+
+    players = {p["name"]: p for p in parse_draftkings(DK_SOCCER_EXPORT, "EPL")}
+
+    assert players["Ousmane Dembele"]["home"] is True    # PSG vs SLO
+    assert players["Kostas Tsimikas"]["home"] is True    # LIV vs ATL
+    assert players["Joan Garcia"]["home"] is False       # ATL, the visitor
+
+
+def test_both_real_soccer_exports_build_a_legal_lineup():
+    from dfs.ingest.salaries import (
+        expand_roster_eligibility, parse_draftkings, parse_fanduel,
+    )
+    from dfs.optimizer.lineup import optimize_lineup
+    from dfs.optimizer.rules import cash_settings
+
+    for site, text, parser in (
+        ("DK", DK_SOCCER_EXPORT, parse_draftkings),
+        ("FD", FD_SOCCER_EXPORT, parse_fanduel),
+    ):
+        config = get_config("EPL", site)
+        players = parser(text, "EPL")
+        for player in players:
+            player["projected_points"] = 5.0
+            player["ceiling"] = 7.5
+            player["floor"] = 3.0
+
+        pool = expand_roster_eligibility(players, config)
+        # Four players cannot fill either roster; what is asserted is
+        # that every one of them is eligible for a slot, which is what
+        # a mismatched position vocabulary would break.
+        slots = {slot.name for slot in config.roster}
+        for player in pool:
+            assert set(player["roster_positions"]) & slots, (site, player["name"])

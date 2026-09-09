@@ -26,9 +26,20 @@ defender loses least of all, so the shortfall is not a constant. Rankings
 within a position are meaningful; rankings across positions are skewed
 toward defenders, and lineups built on them will over-roster defence.
 
-Combined with the soccer scoring tables being unverified to begin with,
-soccer is the weakest of the five sports here by some distance. Treat
-its output as a research aid rather than as projections.
+Both scoring tables have since been read from the sites, so the numbers
+they are scored against are right. The feed is now the whole of the
+problem rather than half of it, and it is a bigger problem than it
+looked: eleven of the twenty-one stats the two sites pay for are
+missing here, not three.
+
+The other limit is competition. This is a Premier League feed and the
+sites run the same soccer rules across every competition they offer, so
+a Champions League or MLS slate scores correctly and projects off no
+history whatsoever -- every player falling back to the site's own
+average, which is the number the entire field is already looking at.
+
+Soccer remains the weakest of the five sports here by some distance.
+Treat its output as a research aid rather than as projections.
 """
 
 from __future__ import annotations
@@ -78,7 +89,33 @@ STAT_COLUMNS = {
 
 # Stats the sites pay for that this feed does not carry at all. Named
 # here so the gap is visible in code rather than only in prose.
-MISSING_STATS = ("shot_on_goal", "created_chance", "cross")
+#
+# This listed three until both scoring tables were read from the sites,
+# at which point it turned out to be fourteen. The additions are not
+# minor: a shot is +1 on both sites, an interception is 0.5 on
+# DraftKings and 1.6 on FanDuel, a clearance and a blocked shot are 1.6
+# each on FanDuel -- which together are most of what a FanDuel defender
+# is bought for -- a goalkeeper's win is +5 and +6, and DraftKings pays
+# 0.02 for every accurate pass, so a midfielder who completes ninety of
+# them banks nearly two points this feed cannot see.
+MISSING_STATS = (
+    "shot",
+    "shot_on_goal",
+    "created_chance",
+    "cross",
+    "accurate_pass",
+    "interception",
+    "clearance",
+    "blocked_shot",
+    "fouls_drawn",
+    "fouls_conceded",
+    "win",
+)
+
+# Also unavailable, and deliberately kept out of the list above: these
+# occur only in a knockout tie decided on penalties, so they are absent
+# from league play rather than absent from the feed.
+MISSING_SHOOTOUT_STATS = ("shootout_goal", "shootout_miss", "shootout_save")
 
 # FPL position -> what the salary files call it.
 POSITIONS = {"GK": "GK", "DEF": "D", "MID": "M", "FWD": "F"}
