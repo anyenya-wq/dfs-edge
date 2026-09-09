@@ -1133,6 +1133,41 @@ def _show_leverage(pool: list[dict], ceiling_weight: float, ownership_penalty: f
     )
 
 
+def _confirmation(player_id: str, by_id: dict) -> str:
+    """Whether the site has confirmed this player is in today's game.
+
+    Shown on a built lineup because that is where it is acted on. A
+    lineup can be legal, well correlated and under the cap while resting
+    on four players nobody has confirmed, and that is not visible from
+    the projections -- an unconfirmed hitter projects exactly like a
+    confirmed one.
+    """
+
+    player = by_id.get(str(player_id))
+
+    if player is None:
+        return ""
+
+    if is_ruled_out(player.get("injury_status")):
+        return "OUT"
+
+    order = player.get("batting_order")
+    if order:
+        return f"✓ #{int(order)}"
+
+    if player.get("starting"):
+        return f"✓ {player['starting']}"
+
+    return "—"
+
+
+def _confirmed_count(lineup, by_id: dict) -> int:
+    return sum(
+        1 for player in lineup.players
+        if _confirmation(player.player_id, by_id).startswith("✓")
+    )
+
+
 def _show_lineups(lineups: list, config, requested: int, attempted: bool = False, pool: list[dict] | None = None) -> None:
     if not lineups and not attempted:
         st.info("Press **Build lineups** in the sidebar.", icon="👈")
@@ -1165,12 +1200,16 @@ def _show_lineups(lineups: list, config, requested: int, attempted: bool = False
 
     _show_export(lineups, config)
 
+    by_id = {str(player["player_id"]): player for player in (pool or [])}
+
     for index, lineup in enumerate(lineups, start=1):
+        confirmed = _confirmed_count(lineup, by_id)
         header = (
             f"Lineup {index} — ${lineup.total_salary:,} · "
             f"proj {lineup.total_projection:.1f} · "
             f"ceiling {lineup.total_ceiling:.1f} · "
-            f"own {lineup.total_ownership:.0f}%"
+            f"own {lineup.total_ownership:.0f}% · "
+            f"{confirmed}/{len(lineup.players)} confirmed"
         )
         with st.expander(header, expanded=index == 1):
             st.dataframe(
@@ -1179,6 +1218,7 @@ def _show_lineups(lineups: list, config, requested: int, attempted: bool = False
                         {
                             "Slot": player.slot,
                             "Player": player.name,
+                            "In": _confirmation(player.player_id, by_id),
                             "Team": player.team,
                             "Opp": player.opponent,
                             "Salary": player.salary,

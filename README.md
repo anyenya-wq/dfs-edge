@@ -189,6 +189,17 @@ The **In** column in the player pool shows what the site says about
 each player today — a batting slot (`#3`), a pitcher code (`SP`), `OUT`,
 or blank for not yet known.
 
+Built lineups carry the same mark: `✓ #3` for a hitter confirmed batting
+third, `✓ SP` for an announced pitcher, `—` for nobody has said yet. Each
+lineup's header counts them — *5/10 confirmed* — so the ones resting on
+unconfirmed players are visible without opening them.
+
+It is not in the upload file, which the site wants as ids and nothing
+else. It exists for the decision you make before uploading: a lineup can
+be legal, well correlated and under the cap while resting on four
+players nobody has confirmed, and the projections cannot show that. An
+unconfirmed hitter projects exactly like a confirmed one.
+
 `IL` and `OUT` are treated as absences; `DTD` is not. A doubt is not an
 absence, and removing a probable starter can leave no legal lineup at
 all — a worse error than carrying a small risk.
