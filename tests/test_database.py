@@ -553,3 +553,94 @@ def test_applying_nothing_is_not_an_error(database):
     slate = database.upsert_slate("MLB", "DK", "2026-09-08")
 
     assert database.apply_availability(slate, [])["matched"] == 0
+
+
+# ----------------------------------------------------------------------
+# Keeping the slate picker usable
+# ----------------------------------------------------------------------
+#
+# Nothing here deletes anything. A slate locked before its games is
+# what the calibration record scores against once results land, so the
+# oldest slate in the database is often the most valuable one. These
+# only decide what the picker offers by default.
+
+
+def _dated_slate(database, sport, site, date, count=3):
+    slate = database.upsert_slate(sport, site, date)
+    database.save_salaries(
+        database.find_slate(sport, site, date),
+        _players(f"{sport.lower()}:{site}:{date}:", count, sport=sport),
+    )
+    return slate
+
+
+def test_the_picker_can_be_held_to_a_recent_window(database):
+    for date in ("2026-09-09", "2026-09-04", "2026-08-01", "2026-06-15"):
+        _dated_slate(database, "MLB", "DK", date)
+
+    recent = database.slates_with_players(since="2026-09-02")
+
+    assert [row["slate_date"] for row in recent] == ["2026-09-09", "2026-09-04"]
+    assert database.slate_count() == 4
+
+
+def test_a_window_does_not_hide_a_slate_that_has_not_happened_yet(database):
+    """Tomorrow's file, uploaded tonight, is the one you most want.
+
+    A window written as "the last seven days" and applied as a range
+    would drop it. It is a floor, not a range.
+    """
+
+    _dated_slate(database, "MLB", "DK", "2026-09-10")
+
+    recent = database.slates_with_players(since="2026-09-02")
+
+    assert [row["slate_date"] for row in recent] == ["2026-09-10"]
+
+
+def test_a_named_slate_survives_the_window(database):
+    """The selected slate must stay in its own list of options.
+
+    Without this, switching to an old slate and then leaving the toggle
+    off removes the selection from the dropdown, and the board silently
+    resets to a slate nobody chose.
+    """
+
+    old = _dated_slate(database, "MLB", "DK", "2026-06-15")
+    _dated_slate(database, "MLB", "DK", "2026-09-09")
+
+    offered = database.slates_with_players(since="2026-09-02", include=[old])
+
+    assert old in {row["id"] for row in offered}
+    assert [row["slate_date"] for row in offered] == ["2026-09-09", "2026-06-15"]
+
+
+def test_naming_a_slate_without_a_window_does_not_narrow_to_it(database):
+    """`include` widens a window; with no window it must do nothing.
+
+    Written as an unconditional OR, an unfiltered call carrying one
+    pinned id returns that one slate and nothing else -- which showed
+    up in the app as "Showing 1 of 60 slates" the moment the toggle
+    was switched on, since the pinned id is always the current
+    selection.
+    """
+
+    one = _dated_slate(database, "MLB", "DK", "2026-06-15")
+    for date in ("2026-09-09", "2026-09-04", "2026-08-01"):
+        _dated_slate(database, "MLB", "DK", date)
+
+    assert len(database.slates_with_players(include=[one])) == 4
+    assert len(database.slates_with_players()) == 4
+
+
+def test_the_count_is_of_every_slate_and_not_of_the_page(database):
+    """"Showing 2 of 4" has to mean four. Measuring the returned list
+    would make the second number equal the first and say nothing."""
+
+    for date in ("2026-09-09", "2026-09-04", "2026-08-01", "2026-06-15"):
+        _dated_slate(database, "MLB", "DK", date)
+    empty = database.upsert_slate("NBA", "FD", "2026-09-09")
+
+    assert database.slate_count() == 4
+    assert len(database.slates_with_players(since="2026-09-02")) == 2
+    assert empty not in {row["id"] for row in database.slates_with_players()}

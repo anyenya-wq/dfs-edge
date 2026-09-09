@@ -608,28 +608,83 @@ class Database:
             )
             self.connection.commit()
 
-    def slates_with_players(self, limit: int = 60) -> list[dict[str, Any]]:
+    def slates_with_players(
+        self,
+        limit: int = 500,
+        since: str | None = None,
+        include: Iterable[int] = (),
+    ) -> list[dict[str, Any]]:
         """Stored slates that actually have a pool, newest first.
 
         The board offers these as somewhere to return to. A slate with
         no salaries is a row created and then abandoned -- it has
         nothing to show, so it is not offered.
+
+        `since` keeps the picker to the slates still worth returning to;
+        a daily sport fills this list quickly and a month-old slate is
+        not somewhere anyone is going back to. `include` names ids that
+        survive that filter regardless, because the one slate that must
+        never be dropped is the one currently on screen -- a selection
+        that vanishes from its own options resets the board.
         """
 
+        # `include` widens a window; with no window there is nothing to
+        # widen and it must not narrow instead. Written the other way
+        # round -- both clauses OR-ed unconditionally -- an unfiltered
+        # call with one pinned id returns exactly that one slate, which
+        # reads on screen as "showing 1 of 60".
+        conditions = []
+        parameters: list[Any] = []
+
+        if since:
+            conditions.append("sl.slate_date >= ?")
+            parameters.append(since)
+
+            ids = [int(slate_id) for slate_id in include]
+            if ids:
+                placeholders = ", ".join("?" for _ in ids)
+                conditions.append(f"sl.id IN ({placeholders})")
+                parameters.extend(ids)
+
+        where = f"WHERE ({' OR '.join(conditions)})" if conditions else ""
+        parameters.append(limit)
+
         rows = self.connection.execute(
-            """
+            f"""
             SELECT sl.id, sl.sport, sl.site, sl.slate_date, sl.name,
                    COUNT(s.player_id) AS players
             FROM slates sl
             JOIN salaries s ON s.slate_id = sl.id
+            {where}
             GROUP BY sl.id, sl.sport, sl.site, sl.slate_date, sl.name
             ORDER BY sl.slate_date DESC, sl.id DESC
             LIMIT ?
             """,
-            (limit,),
+            tuple(parameters),
         ).fetchall()
 
         return [dict(row) for row in rows]
+
+    def slate_count(self) -> int:
+        """How many slates have a pool at all.
+
+        Read separately rather than by measuring the list above, so
+        "showing 12 of 82" is the real 82 and not the length of
+        whatever the query happened to return.
+        """
+
+        row = self.connection.execute(
+            """
+            SELECT COUNT(*) AS slates FROM (
+                SELECT sl.id
+                FROM slates sl
+                JOIN salaries s ON s.slate_id = sl.id
+                GROUP BY sl.id
+            ) with_players
+            """
+        ).fetchone()
+
+        return int(row["slates"]) if row else 0
 
     def player_pool(self, slate_id: int) -> list[dict[str, Any]]:
         """The salary pool for a slate, joined to any stored projection."""

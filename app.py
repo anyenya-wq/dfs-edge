@@ -253,7 +253,21 @@ def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | Non
     the file you had already uploaded.
     """
 
-    slates = database.slates_with_players()
+    # Two ids that must appear whatever the window is: whatever is on
+    # screen now, and whatever the sidebar's own sport, site and date
+    # point at. An option that disappears from under a selection resets
+    # the board to a slate the user did not choose.
+    matching = database.find_slate(sport, site, slate_date)
+    chosen = st.session_state.get("slate_choice")
+    pinned = [value for value in (chosen, matching) if isinstance(value, int)]
+
+    show_all = st.session_state.get("show_all_slates", False)
+    since = None if show_all else (
+        dt.date.today() - dt.timedelta(days=RECENT_DAYS)
+    ).isoformat()
+
+    slates = database.slates_with_players(since=since, include=pinned)
+    total = database.slate_count()
 
     if not slates:
         return None
@@ -265,8 +279,7 @@ def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | Non
 
     # Default to the sidebar's selection when a slate matches it, so the
     # selectors still steer the board.
-    matching = database.find_slate(sport, site, slate_date)
-    default = st.session_state.get("slate_choice")
+    default = chosen
     if default not in labels:
         default = matching if matching in labels else slates[0]["id"]
 
@@ -297,10 +310,50 @@ def _choose_slate(database, sport: str, site: str, slate_date: str) -> int | Non
         index=ids.index(default),
         format_func=lambda slate_id: labels[slate_id],
         key="slate_choice",
-        help="Every salary file you have uploaded. Switching here does not re-upload anything.",
+        help=(
+            "The salary files you have uploaded. Switching here does not "
+            "re-upload anything, and nothing is ever deleted -- older slates "
+            "are only hidden, and the toggle below brings them back."
+        ),
     )
 
+    _show_slate_count(len(labels), total, show_all)
+
     return choice
+
+
+def _show_slate_count(shown: int, total: int, show_all: bool) -> None:
+    """How many slates are listed, and how many exist.
+
+    Worth saying out loud. The list used to stop at sixty with no
+    indication, so a slate could be in the database, findable by
+    nothing, and reported nowhere -- the same failure as a caveat
+    written down and never displayed.
+    """
+
+    hidden = total - shown
+
+    if hidden > 0 and not show_all:
+        st.caption(
+            f"Showing {shown} of {total} slates -- the last {RECENT_DAYS} days. "
+            f"{hidden} older {'one is' if hidden == 1 else 'ones are'} hidden, not deleted."
+        )
+    elif hidden > 0:
+        # Only reachable past the query's own limit, and then it is the
+        # limit doing the hiding rather than the date window.
+        st.caption(f"Showing {shown} of {total} slates.")
+    else:
+        st.caption(f"{total} {'slate' if total == 1 else 'slates'}, all shown.")
+
+    st.checkbox(
+        f"Show slates older than {RECENT_DAYS} days",
+        key="show_all_slates",
+        help=(
+            "Old slates are kept on purpose: a slate you locked before its "
+            "games is what the calibration record scores against once the "
+            "results land."
+        ),
+    )
 
 
 def _slate_date_control(database, stored) -> str:
@@ -946,6 +999,12 @@ def _history_attempted(sport: str) -> dict:
 # Sports whose first load walks an API game by game rather than
 # downloading a season as one file.
 SLOW_FIRST_LOAD = {"MLB", "NHL"}
+
+# How far back the slate picker looks before hiding the rest behind a
+# toggle. Two sites across a daily sport is fourteen slates a week, so
+# this is about a page of them -- long enough to cover a weekend just
+# gone, short enough that today's is still at the top.
+RECENT_DAYS = 7
 
 
 def _ensure_history(database: Database, sport: str) -> None:
