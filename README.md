@@ -238,11 +238,21 @@ that changes shape yields stale lineups with no error at all — worse
 than none, because you act on them. Reading one yourself and ticking
 the boxes is a different thing, and fine.
 
-**A salary file is a snapshot.** On a fifteen-game slate a dozen starters
-may be announced and the rest not yet. Pitchers are therefore excluded
-only within teams that have named someone: a team that has announced
-nobody keeps all of its pitchers, and the app says which teams those
-are. Export the file again nearer lock and the gaps fill in.
+**A salary file is a snapshot**, and once anybody has been announced,
+only announced pitchers are worth rostering. A pitcher nobody has named
+is not known to be starting, and one who is not starting throws an
+inning in relief at most — while projecting on his rate per inning,
+which is how a reliever priced like a starter wins an optimizer on
+innings he will never throw.
+
+So the exclusion covers the whole slate, not just the teams that have
+named someone. Nothing is excluded until something is announced: first
+thing in the morning every staff is still in, which is correct, because
+nobody knows anything yet.
+
+If you know a starter the file has not caught up to, name him in the
+confirmed list — that keeps him and drops his team-mates. The checkbox
+that keeps unannounced teams whole is the blunter alternative.
 
 ### Batting-order stacks
 

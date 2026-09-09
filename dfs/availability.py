@@ -102,15 +102,30 @@ def benched_hitters(pool, starter_positions) -> set[str]:
     return benched
 
 
-def sidelined_pitchers(pool, confirmed, starter_positions) -> set[str]:
-    """Pitchers whose team named someone else.
+def sidelined_pitchers(pool, confirmed, starter_positions, whole_slate=True) -> set[str]:
+    """Pitchers who are not the named starter, and so are not playing.
 
-    A team that has announced nobody keeps every one of its pitchers:
-    excluding them would delete that game from the pool, including the
-    starter, who could then not be rostered at all.
+    Once anybody has been announced, only announced pitchers are worth
+    rostering. A pitcher nobody has named is not known to be starting,
+    and one who is not starting throws an inning in relief at most --
+    while projecting on his rate per inning, which is how a reliever
+    priced like a starter wins an optimizer outright.
+
+    `whole_slate` is that rule. Turning it off narrows the exclusion to
+    teams that have named someone, which keeps the rest of the league's
+    bullpens eligible -- only useful if you know a starter the file does
+    not, and even then naming him in the confirmed list is better.
+
+    Nothing is excluded until something is announced. First thing in the
+    morning the whole staff of every team is still in, which is correct:
+    nobody knows anything yet.
     """
 
     confirmed = {str(player_id) for player_id in confirmed}
+
+    if not confirmed:
+        return set()
+
     by_id = {str(player["player_id"]): player for player in pool}
 
     decided = {
@@ -123,5 +138,5 @@ def sidelined_pitchers(pool, confirmed, starter_positions) -> set[str]:
         str(player["player_id"]) for player in pool
         if is_starter_position(player, starter_positions)
         and str(player["player_id"]) not in confirmed
-        and str(player.get("team") or "") in decided
+        and (whole_slate or str(player.get("team") or "") in decided)
     }

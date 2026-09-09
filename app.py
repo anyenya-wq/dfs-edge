@@ -487,17 +487,13 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
             )
 
             if confirmed:
-                # Only within teams that have named someone. A salary
-                # file is a snapshot: on a fifteen-game slate a dozen
-                # starters may be announced and the rest not yet, and
-                # excluding every pitcher who is not on the list would
-                # quietly delete those games from the pool -- including
-                # the starters, who cannot then be rostered at all.
-                #
-                # So a pitcher is excluded when a team-mate has been
-                # announced and he has not. A team that has announced
-                # nobody keeps all of its pitchers.
-                bans |= sidelined_pitchers(projected, confirmed, starter_positions)
+                # Once anybody has been announced, only announced
+                # pitchers are worth rostering: one nobody has named is
+                # not known to be starting, and a pitcher who is not
+                # starting throws an inning in relief at most -- while
+                # projecting on his rate per inning, which is exactly
+                # how a reliever priced like a starter wins the
+                # optimizer on innings he will never throw.
                 decided = {
                     str(by_id[player_id].get("team") or "") for player_id in confirmed
                 }
@@ -505,17 +501,34 @@ def _availability_controls(database, projected, config, slate_id: int, slate_dat
                     {str(by_id[player_id].get("team") or "") for player_id in starters}
                     - decided - {""}
                 )
+
+                whole_slate = True
+                if undecided:
+                    whole_slate = not st.checkbox(
+                        f"Keep pitchers from the {len(undecided)} team(s) that "
+                        f"have not announced",
+                        value=False,
+                        key=f"undecided_{slate_id}",
+                        help=(
+                            f"{', '.join(undecided)} have named nobody. Their "
+                            f"pitchers are excluded by default, because an "
+                            f"unannounced pitcher is not known to be starting. "
+                            f"Tick this only if you know a starter the file "
+                            f"does not -- and it is better to name him in the "
+                            f"list above, which keeps his team-mates out."
+                        ),
+                    )
+
+                bans |= sidelined_pitchers(
+                    projected, confirmed, starter_positions, whole_slate=whole_slate
+                )
+
                 st.caption(
                     f"{len(confirmed)} confirmed; {len(bans)} other "
-                    f"{names} on those teams excluded."
+                    f"{names} excluded."
+                    + ("" if whole_slate else
+                       f" {', '.join(undecided)} kept, unannounced.")
                 )
-                if undecided:
-                    st.caption(
-                        f":orange[{len(undecided)} team(s) have not announced "
-                        f"anyone yet — {', '.join(undecided)}. Their pitchers "
-                        f"are all still in the pool. Export the file again "
-                        f"nearer lock to narrow them.]"
-                    )
 
         # The same rule as pitchers, and a more certain one. A team whose
         # lineup has posted has said who is batting; anyone else on that

@@ -102,9 +102,11 @@ def test_naming_a_starter_sidelines_his_team_mates():
     assert sidelined_pitchers(pool, {"ace"}, PITCHERS) == {"reliever", "other-reliever"}
 
 
-def test_a_team_that_has_announced_nobody_keeps_its_whole_staff():
-    """Excluding them would delete that game -- including its starter,
-    who could then not be rostered at all."""
+def test_an_unannounced_team_is_excluded_too_unless_asked_otherwise():
+    """An earlier version kept them, on the reasoning that excluding a
+    game's starter made him unrosterable. That was wrong: a pitcher
+    nobody has named is not known to be the starter, so keeping him only
+    exposes the pool to his bullpen."""
 
     pool = [
         _player("ace", "MIL", "SP", starting="SP"),
@@ -113,7 +115,12 @@ def test_a_team_that_has_announced_nobody_keeps_its_whole_staff():
         _player("sea-reliever", "SEA", "RP"),
     ]
 
-    assert sidelined_pitchers(pool, {"ace"}, PITCHERS) == {"mil-reliever"}
+    assert sidelined_pitchers(pool, {"ace"}, PITCHERS) == {
+        "mil-reliever", "sea-starter", "sea-reliever",
+    }
+    assert sidelined_pitchers(pool, {"ace"}, PITCHERS, whole_slate=False) == {
+        "mil-reliever",
+    }
 
 
 def test_hitters_are_never_sidelined_by_the_pitcher_rule():
@@ -151,3 +158,53 @@ def test_a_pool_with_nothing_announced_excludes_nobody():
     assert ruled_out(pool) == set()
     assert benched_hitters(pool, PITCHERS) == set()
     assert sidelined_pitchers(pool, set(), PITCHERS) == set()
+
+
+def test_once_anyone_is_announced_unannounced_pitchers_go_too():
+    """A pitcher nobody has named is not known to be starting, and one
+    who is not starting throws an inning in relief at most -- on a rate
+    per inning good enough to win the optimizer outright."""
+
+    pool = [
+        _player("ace", "MIL", "SP", starting="SP"),
+        _player("mil-pen", "MIL", "RP"),
+        _player("tor-sp", "TOR", "SP"),
+        _player("tor-pen", "TOR", "RP"),
+        _player("hitter", "TOR"),
+    ]
+
+    assert sidelined_pitchers(pool, {"ace"}, PITCHERS) == {
+        "mil-pen", "tor-sp", "tor-pen",
+    }
+
+
+def test_nothing_is_excluded_before_anything_is_announced():
+    """First thing in the morning, nobody knows anything yet."""
+
+    pool = [_player("a", "MIL", "SP"), _player("b", "TOR", "RP")]
+
+    assert sidelined_pitchers(pool, set(), PITCHERS) == set()
+
+
+def test_the_narrow_rule_keeps_unannounced_teams_whole():
+    """For when you know a starter the file does not."""
+
+    pool = [
+        _player("ace", "MIL", "SP", starting="SP"),
+        _player("mil-pen", "MIL", "RP"),
+        _player("tor-sp", "TOR", "SP"),
+    ]
+
+    assert sidelined_pitchers(pool, {"ace"}, PITCHERS, whole_slate=False) == {"mil-pen"}
+
+
+def test_naming_a_starter_yourself_keeps_him_and_drops_his_team_mates():
+    """The better way to handle a starter the file has not caught up to."""
+
+    pool = [
+        _player("ace", "MIL", "SP", starting="SP"),
+        _player("tor-sp", "TOR", "SP"),
+        _player("tor-pen", "TOR", "RP"),
+    ]
+
+    assert sidelined_pitchers(pool, {"ace", "tor-sp"}, PITCHERS) == {"tor-pen"}
