@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from dfs.ingest.salaries import is_ruled_out, parse_draftkings, parse_starting
+from dfs.availability import announced_starters, benched_hitters
+from dfs.ingest.salaries import (
+    BENCHED, is_ruled_out, parse_draftkings, parse_fanduel, parse_starting,
+)
 
 HEADER = (
     "Position,Name + ID,Name,ID,Roster Position,Salary,Game Info,TeamAbbrev,"
@@ -112,3 +115,100 @@ def test_a_file_without_the_columns_still_parses():
     assert pool[0]["starting"] is None
     assert pool[0]["batting_order"] is None
     assert pool[0]["injury_status"] is None
+
+
+# ----------------------------------------------------------------------
+# FanDuel, which says outright what DraftKings leaves to be inferred
+# ----------------------------------------------------------------------
+
+
+FD_HEADER = (
+    "Id,Position,First Name,Nickname,Last Name,FPPG,Played,Salary,Game,Team,"
+    "Opponent,Injury Indicator,Injury Details,Tier,Probable Pitcher,"
+    "Batting Order,Roster Position"
+)
+
+
+def _fd_file(rows) -> str:
+    lines = [FD_HEADER]
+    for index, (position, name, injury, probable, order) in enumerate(rows):
+        lines.append(
+            f"9-{index},{position},First,{name},Last,9.5,20,5000,CHC@MIL,MIL,"
+            f"CHC,{injury},,,{probable},{order},{position}"
+        )
+    return "\n".join(lines)
+
+
+def test_fanduel_names_its_probable_pitchers_in_a_column_of_their_own():
+    pool = parse_fanduel(_fd_file([
+        ("P", "Probable", "", "Yes", "0"),
+        ("P", "Not Probable", "", "", "0"),
+    ]), "MLB")
+
+    by_name = {player["name"]: player for player in pool}
+
+    assert by_name["Probable"]["starting"] == "SP"
+    assert by_name["Not Probable"]["starting"] is None
+
+
+def test_a_pitchers_batting_order_of_zero_is_not_a_bench_marking():
+    """He was never going to bat. His availability is the other column."""
+
+    pool = parse_fanduel(_fd_file([("P", "Someone", "", "Yes", "0")]), "MLB")
+
+    assert pool[0]["starting"] == "SP"
+    assert pool[0]["batting_order"] is None
+
+
+def test_zero_means_the_card_is_out_and_he_is_not_on_it():
+    """The distinction DraftKings cannot express, and FanDuel can."""
+
+    pool = parse_fanduel(_fd_file([
+        ("OF", "Batting Third", "", "", "3"),
+        ("OF", "Benched", "", "", "0"),
+        ("OF", "Card Not Out", "", "", ""),
+    ]), "MLB")
+
+    by_name = {player["name"]: player for player in pool}
+
+    assert by_name["Batting Third"]["batting_order"] == 3
+    assert by_name["Benched"]["starting"] == BENCHED
+    assert by_name["Benched"]["batting_order"] is None
+    assert by_name["Card Not Out"]["starting"] is None
+
+
+def test_an_explicitly_benched_hitter_is_benched_whatever_his_team_did():
+    """No inference needed, so none is used."""
+
+    pool = parse_fanduel(_fd_file([("OF", "Benched", "", "", "0")]), "MLB")
+
+    assert benched_hitters(pool, ("P", "SP", "RP")) == {pool[0]["player_id"]}
+
+
+def test_a_blank_order_on_a_team_that_has_not_posted_is_not_benched():
+    pool = parse_fanduel(_fd_file([
+        ("OF", "Unknown", "", "", ""),
+        ("OF", "Also Unknown", "", "", ""),
+    ]), "MLB")
+
+    assert benched_hitters(pool, ("P", "SP", "RP")) == set()
+
+
+def test_a_benched_hitter_is_never_counted_as_an_announced_starter():
+    """`starting` carries both facts, so the marker has to be excluded."""
+
+    pool = parse_fanduel(_fd_file([("OF", "Benched", "", "", "0")]), "MLB")
+
+    assert announced_starters(pool, ("P", "SP", "RP")) == set()
+
+
+def test_fanduels_injury_column_is_read():
+    pool = parse_fanduel(_fd_file([
+        ("OF", "On IL", "IL", "", "0"),
+        ("OF", "Day To Day", "DTD", "", "3"),
+    ]), "MLB")
+
+    by_name = {player["name"]: player for player in pool}
+
+    assert is_ruled_out(by_name["On IL"]["injury_status"])
+    assert not is_ruled_out(by_name["Day To Day"]["injury_status"])

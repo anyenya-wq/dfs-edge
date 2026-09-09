@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from dfs.ingest.salaries import is_ruled_out
+from dfs.ingest.salaries import BENCHED, is_ruled_out
 
 
 def _positions(player: Mapping[str, Any]) -> set[str]:
@@ -56,6 +56,7 @@ def announced_starters(pool, starter_positions) -> set[str]:
         str(player["player_id"]) for player in pool
         if is_starter_position(player, starter_positions)
         and player.get("starting")
+        and str(player["starting"]).upper() != BENCHED
         and not player.get("batting_order")
     }
 
@@ -72,18 +73,33 @@ def teams_with_posted_lineups(pool) -> set[str]:
 def benched_hitters(pool, starter_positions) -> set[str]:
     """Hitters left out of their own team's posted lineup.
 
-    Only within teams that have posted. A team still to name its lineup
-    tells us nothing about who is sitting.
+    Two ways of knowing, and the explicit one wins. FanDuel writes a
+    batting order of `0` against a player its published card leaves out,
+    and blank against one whose card is not out yet -- so it says
+    outright who is sitting. DraftKings leaves both blank, so there it
+    has to be inferred: the team posted a lineup and this hitter is not
+    in it.
+
+    The inference is very slightly coarser, which is why it is the
+    fallback. A player added to a pool after the card was published
+    reads as benched under it, and as unknown under FanDuel's column.
     """
 
     posted = teams_with_posted_lineups(pool)
+    benched = set()
 
-    return {
-        str(player["player_id"]) for player in pool
-        if str(player.get("team") or "") in posted
-        and not player.get("batting_order")
-        and not is_starter_position(player, starter_positions)
-    }
+    for player in pool:
+        if is_starter_position(player, starter_positions):
+            continue
+        if player.get("batting_order"):
+            continue
+
+        if str(player.get("starting") or "").upper() == BENCHED:
+            benched.add(str(player["player_id"]))
+        elif str(player.get("team") or "") in posted:
+            benched.add(str(player["player_id"]))
+
+    return benched
 
 
 def sidelined_pitchers(pool, confirmed, starter_positions) -> set[str]:

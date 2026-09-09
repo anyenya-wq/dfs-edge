@@ -97,6 +97,43 @@ def is_ruled_out(status: str | None) -> bool:
     return str(status or "").strip().upper() in RULED_OUT
 
 
+# Written into `starting` for a player the site has confirmed is not in
+# today's lineup, as opposed to one it has said nothing about yet.
+# FanDuel makes that distinction and DraftKings does not.
+BENCHED = "BENCH"
+
+
+def parse_fanduel_availability(row) -> tuple[str | None, int | None]:
+    """What FanDuel's own columns say about one player today.
+
+    Two separate columns rather than DraftKings' single overloaded one,
+    and one of them carries a distinction DraftKings cannot express: a
+    batting order of `0` means the lineup card is out and this player is
+    not on it, where blank means the card has not been published. On a
+    real slate that was 21 bench players against a posted lineup, and
+    31 blanks for the one team yet to post.
+
+    Pitchers carry `0` too -- they were never going to bat -- so their
+    availability is read from the probable-pitcher column instead, and
+    the batting order is ignored entirely.
+    """
+
+    positions = _split_positions(row.get("Position"))
+    order = str(row.get("Batting Order") or "").strip()
+
+    if any(position in ("P", "SP", "RP") for position in positions):
+        probable = str(row.get("Probable Pitcher") or "").strip().lower()
+        return ("SP", None) if probable in ("yes", "y", "true", "1") else (None, None)
+
+    if order.isdigit() and 1 <= int(order) <= 9:
+        return order, int(order)
+
+    if order == "0":
+        return BENCHED, None
+
+    return None, None
+
+
 def parse_starting(raw: str | None) -> tuple[str | None, int | None]:
     """What the site says about a player being in today's lineup.
 
@@ -252,6 +289,7 @@ def parse_fanduel(source: str | Iterable[str], sport: str) -> list[dict[str, Any
         roster_positions = _split_positions(row.get("Roster Position")) or positions
 
         opponent = (row.get("Opponent") or "").upper() or game.get("opponent")
+        starting, batting_order = parse_fanduel_availability(row)
 
         pool.append(
             {
@@ -265,6 +303,8 @@ def parse_fanduel(source: str | Iterable[str], sport: str) -> list[dict[str, Any
                 "fd_id": row.get("Id") or None,
                 "site_avg_points": _as_float(row.get("FPPG")),
                 "injury_status": (row.get("Injury Indicator") or "").upper() or None,
+                "starting": starting,
+                "batting_order": batting_order,
                 "game_id": game.get("game_id"),
                 "opponent": opponent,
                 "home": game.get("home"),

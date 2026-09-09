@@ -215,8 +215,15 @@ unconfirmed hitter projects exactly like a confirmed one.
 absence, and removing a probable starter can leave no legal lineup at
 all — a worse error than carrying a small risk.
 
-FanDuel's export has an injury indicator, which is read, but no batting
-order, so its starters are still named by hand.
+**FanDuel says more, not less.** Its export has three separate columns
+where DraftKings has one: `Probable Pitcher`, `Batting Order`, and
+`Injury Indicator`. And its batting order carries a distinction
+DraftKings cannot express — `0` means the lineup card is out and this
+player is not on it, blank means the card has not been published. So on
+a FanDuel file the bench is stated rather than inferred.
+
+It still carries no date, so the date is supplied at upload and
+corrected with **Games are played on** if wrong.
 
 **Refresh starters from MLB** reads the same facts from
 statsapi.mlb.com — official, free, no key, and the source the stat

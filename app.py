@@ -29,7 +29,7 @@ from dfs.availability import (
     announced_starters, benched_hitters, ruled_out, sidelined_pitchers,
     teams_with_posted_lineups,
 )
-from dfs.ingest.salaries import is_ruled_out
+from dfs.ingest.salaries import BENCHED, is_ruled_out
 from dfs.export import (
     ExportError, readable_filename, to_readable_csv, to_upload_csv, upload_filename,
 )
@@ -1163,7 +1163,12 @@ def _confirmation(player_id: str, by_id: dict, posted: frozenset = frozenset()) 
     if order:
         return f"✓ #{int(order)}"
 
-    if player.get("starting"):
+    starting = str(player.get("starting") or "")
+
+    if starting.upper() == BENCHED:
+        return "bench"
+
+    if starting:
         confirmed = str(player.get("team") or "") in posted
         return "✓ starting" if confirmed else "~ probable"
 
