@@ -9,6 +9,7 @@ import pytest
 
 from dfs.ingest.salaries import expand_roster_eligibility
 from dfs.optimizer.lineup import (
+    _eligible_slots,
     InfeasibleLineup,
     exposure_report,
     optimize_lineup,
@@ -596,3 +597,83 @@ def test_a_distinct_team_floor_does_not_forbid_a_big_side():
     which DraftKings permits and a per-team cap would not."""
 
     assert get_config("EPL", "DK").max_per_team is None
+
+
+# ----------------------------------------------------------------------
+# Slot eligibility comes from the site, not from memory
+# ----------------------------------------------------------------------
+
+
+def test_published_roster_positions_replace_derived_ones_rather_than_adding():
+    """A catcher-eligible first baseman put in the C slot.
+
+    The site said 1B for this slate. The player's stored positions
+    still said C, from a file for another slate or the other site. The
+    two were unioned, so the solver believed both and DraftKings
+    rejected the lineup at upload -- naming the player, saying nothing
+    about why.
+
+    Fixing the pool's eligibility was not enough on its own: the solver
+    derives slots again here, and this is the path that was still
+    widening them.
+    """
+
+    config = get_config("MLB", "DK")
+    player = {
+        "name": "Salvador Perez",
+        "roster_positions": ["1B"],
+        "positions": ["C", "1B"],
+    }
+
+    assert _eligible_slots(player, config) == ["1B"]
+
+
+def test_a_player_the_site_lists_at_two_slots_keeps_both():
+    config = get_config("MLB", "DK")
+    player = {"roster_positions": ["C", "1B"], "positions": ["1B", "C"]}
+
+    assert _eligible_slots(player, config) == ["1B", "C"]
+
+
+def test_positions_are_still_used_when_the_site_publishes_no_slots():
+    config = get_config("MLB", "DK")
+    player = {"roster_positions": [], "positions": ["SS"]}
+
+    assert _eligible_slots(player, config) == ["SS"]
+
+
+def test_positions_are_used_when_published_names_are_not_slot_names():
+    """FanDuel soccer lists FWD and MID against a slot called FWD/MID,
+    so the published names intersect nothing and the positions are the
+    only way into the slot."""
+
+    config = get_config("EPL", "FD")
+    player = {"roster_positions": ["FWD", "MID"], "positions": ["FWD"]}
+
+    assert _eligible_slots(player, config) == ["FWD/MID"]
+
+
+def test_no_lineup_places_a_player_where_the_site_did_not_list_him():
+    """End to end, with the stored positions deliberately wrong.
+
+    Every player is given every position, which is what an overwritten
+    `players` row looks like at its worst. Only the published roster
+    positions should decide, so no lineup may use a slot the pool did
+    not publish for that player.
+    """
+
+    config = get_config("MLB", "DK")
+    pool = _pool(config)
+    everything = ["C", "1B", "2B", "3B", "SS", "OF", "P"]
+    published = {}
+    for player in pool:
+        published[player["player_id"]] = set(player["roster_positions"])
+        player["positions"] = everything
+
+    lineups = optimize_lineups(pool, config, gpp_settings(config), count=10)
+
+    assert lineups
+    for lineup in lineups:
+        for player in lineup.players:
+            allowed = published[player.player_id]
+            assert player.slot in allowed, f"{player.name} placed at {player.slot}"

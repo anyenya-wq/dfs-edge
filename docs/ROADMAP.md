@@ -192,6 +192,22 @@ Checked by building twenty lineups from the real DraftKings pool with
 the FanDuel file loaded alongside, then validating every placement
 against the export's own Roster Position column: zero invalid.
 
+That check passed and the bug was still there. Fixing the pool's
+eligibility was not enough, because the optimizer derives slots again
+for itself and was unioning the derived set into the published one --
+so a first baseman the site listed at 1B, whose stored positions still
+said C, was eligible at both. The union is gone: published roster
+positions now replace the derived ones rather than adding to them, and
+deriving from positions remains only the fallback for a file that
+publishes no slots, or one whose published names are not slot names
+(FanDuel soccer lists FWD and MID against a slot called FWD/MID).
+
+The first check missed it because its fixture was consistent -- the
+positions and the published slots agreed, so a union of the two was
+indistinguishable from either. It now runs with every player given
+every position, which is what an overwritten row looks like at its
+worst, and still places nobody where the file does not list him.
+
 ## 2. Hosting — done
 
 The database is addressed by URL, so SQLite runs locally and PostgreSQL

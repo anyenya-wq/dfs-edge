@@ -116,19 +116,29 @@ def _presence_indicators(problem, groups, label: str) -> dict[str, pulp.LpVariab
 def _eligible_slots(player: Mapping[str, Any], config: SportConfig) -> list[str]:
     """Slot names this player may legally fill.
 
-    Trusts the site's published roster positions when present, since
-    they are authoritative, and falls back to matching the player's
-    listed positions against each slot's eligible set.
+    The site's published roster positions are authoritative and replace
+    the derived ones rather than adding to them. Unioning the two is
+    what put a catcher-eligible first baseman in the C slot: the site
+    said 1B for this slate, the player's stored positions still said C
+    from another file, and the union said both. DraftKings rejects that
+    lineup at upload, naming the player and saying nothing about why.
+
+    Deriving from positions remains the fallback for a file that
+    publishes none, and for one whose published names do not match the
+    slot names -- FanDuel soccer lists FWD and MID against a slot
+    called FWD/MID, so the intersection there is empty and the
+    positions are the only way in.
     """
 
     published = {str(position).upper() for position in player.get("roster_positions") or []}
     slot_names = {slot.name.upper() for slot in config.roster}
-    named = published & slot_names
+    named = {slot.name for slot in config.roster if slot.name.upper() in published}
+
+    if named:
+        return sorted(named)
 
     positions = [str(position).upper() for position in player.get("positions") or []]
-    derived = {slot.name for slot in config.roster if slot.accepts(positions)}
-
-    return sorted(named | derived)
+    return sorted(slot.name for slot in config.roster if slot.accepts(positions))
 
 
 def _score(player: Mapping[str, Any], settings: OptimizerSettings, jitter: float) -> float:
