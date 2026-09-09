@@ -1051,6 +1051,12 @@ class Database:
         self.save_projections(slate_id, [projection])
 
 
+    # A locked projection is the record. Re-projecting a slate must not
+    # touch it, and until the WHERE clause below it did: opening a
+    # slate you locked yesterday re-ran the engine and overwrote the
+    # forecast in place, so calibration scored a number written after
+    # the games with history the original never had. Nothing errored,
+    # and the skill figure moved.
     _PROJECTION_SQL = """
         INSERT INTO projections (
             slate_id, player_id, projected_points, floor, ceiling, stdev,
@@ -1064,6 +1070,7 @@ class Database:
             stdev = excluded.stdev,
             projected_opportunity = excluded.projected_opportunity,
             projected_ownership = excluded.projected_ownership
+        WHERE projections.locked_at IS NULL
     """
 
     @staticmethod
@@ -1147,8 +1154,16 @@ class Database:
             self.connection.commit()
 
 
-    def resolved_projections(self, sport: str | None = None) -> list[dict[str, Any]]:
-        """Locked projections that have an actual result, for scoring."""
+    def resolved_projections(
+        self, sport: str | None = None, site: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Locked projections that have an actual result, for scoring.
+
+        Filterable by site as well as sport, because the two sites score
+        the same game differently enough that averaging them says
+        nothing about either. Without it the board showed one site's
+        record under the other's name.
+        """
 
         query = """
             SELECT
@@ -1176,12 +1191,15 @@ class Database:
             LEFT JOIN salaries s ON s.slate_id = pr.slate_id AND s.player_id = pr.player_id
             WHERE pr.locked_at IS NOT NULL AND a.actual_points IS NOT NULL
         """
-        params: tuple[Any, ...] = ()
+        params: list[Any] = []
         if sport:
             query += " AND sl.sport = ?"
-            params = (sport.upper(),)
+            params.append(sport.upper())
+        if site:
+            query += " AND sl.site = ?"
+            params.append(site.upper())
 
-        rows = self.connection.execute(query, params).fetchall()
+        rows = self.connection.execute(query, tuple(params)).fetchall()
         results = []
         for row in rows:
             record = dict(row)

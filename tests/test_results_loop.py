@@ -221,6 +221,12 @@ def test_a_substantial_forward_record_is_compared_to_the_backtest():
         records.append({
             "forward": 1 if forward else 0,
             "positions": ["PG"],
+            # Spread over ten nights. A record this size drawn from one
+            # slate is one evening wearing a large n, and the verdict
+            # now says that instead of comparing skill scores.
+            "sport": "NBA",
+            "site": "DK",
+            "slate_date": f"2026-01-{(index % 10) + 1:02d}",
             "projected_points": true + generator.gauss(0, noise),
             "site_avg_points": true + generator.gauss(0, 9),
             "actual_points": max(true + generator.gauss(0, 6), 0),

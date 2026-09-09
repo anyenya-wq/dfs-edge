@@ -134,6 +134,38 @@ DraftKings rejects at upload.
 Still unverified at source: both NBA pairs and both NHL pairs. Each
 carries a note in the app naming what specifically is unchecked.
 
+## 1b. The first forward record, and what reading it exposed
+
+One MLB slate locked and scored. The loop works. Reading the output
+found four things.
+
+**Locked projections were being overwritten.** The projections table
+upserted on conflict without regard for `locked_at`, so re-opening a
+locked slate re-ran the engine and replaced the forecast in place.
+Calibration then scored a number written *after* the games, built on
+history the original never had -- a look-ahead leak into the one
+measurement whose entire purpose is to be free of one. Nothing errored;
+the skill figure simply moved. This is the serious one.
+
+**The panel ignored the site selector.** It read every slate for the
+sport, so a DraftKings record appeared under a FanDuel heading with
+only a small scope cell to say otherwise. Filtered now, with the
+by-sport table still spanning every pair so nothing is lost.
+
+**The best-looking positions were players who scored nothing.** A
+group where every actual is identical has no ordering to get right, so
+its skill collapses to whether the model's mean sits nearer that one
+number than the site average does -- for a group of zeros, to
+projecting lower. Two such groups topped a real position table and
+read as the model's strongest. They are flagged now, the count of
+zeros is a column, and skill is reported again over players who
+actually scored.
+
+**A single slate was read as a track record.** The verdict gated on
+projection count alone, and one MLB pool is most of a thousand
+projections by itself. Slates are counted now, and below five the
+verdict says what the record does and does not establish.
+
 ## 2. Hosting — done
 
 The database is addressed by URL, so SQLite runs locally and PostgreSQL

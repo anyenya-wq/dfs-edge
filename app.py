@@ -900,7 +900,7 @@ def main() -> None:
 
     if slate_id is None:
         _show_getting_started(config)
-        _show_calibration(database, sport)
+        _show_calibration(database, sport, site)
         return
 
     stored = database.slate(slate_id)
@@ -980,7 +980,7 @@ def main() -> None:
     with calibration_tab:
         _show_results_controls(database, slate_id, slate_date)
         st.divider()
-        _show_calibration(database, sport)
+        _show_calibration(database, sport, site)
 
 
 @st.cache_resource(show_spinner=False)
@@ -1680,11 +1680,19 @@ def _show_results_controls(database: Database, slate_id: int, slate_date: str) -
         )
 
 
-def _show_calibration(database: Database, sport: str) -> None:
+def _show_calibration(database: Database, sport: str, site: str) -> None:
     st.subheader("Calibration")
+    st.caption(
+        f"{sport} on {'DraftKings' if site == 'DK' else 'FanDuel'}. "
+        "The two sites score the same game differently, so their records are "
+        "kept apart; the table at the foot compares across them."
+    )
 
-    records = database.resolved_projections(sport)
-    report = calibration_report(records)
+    # Filtered to the pair on screen, which it was not: the panel read
+    # every slate for the sport and showed one site's record under the
+    # other's heading. The comparison table still spans everything.
+    records = database.resolved_projections(sport, site)
+    report = calibration_report(records, comparison=database.resolved_projections())
 
     st.markdown(f"**{report['verdict']}**")
 
@@ -1713,7 +1721,11 @@ def _show_calibration(database: Database, sport: str) -> None:
                 "Baseline MAE": row["baseline_mae"],
                 "Skill": row["skill"],
             }
-            for label, row in (("forward", forward), ("backtest", backtest))
+            for label, row in (
+                ("forward", forward),
+                ("forward, scored only", report.get("forward_played")),
+                ("backtest", backtest),
+            )
             if row
         ]
         st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
@@ -1740,13 +1752,53 @@ def _show_calibration(database: Database, sport: str) -> None:
         "matters, not the absolute error."
     )
 
+    if report.get("sample_warning"):
+        st.warning(report["sample_warning"], icon="⚠️")
+
     if report["by_position"]:
         st.markdown("**By position** — watch for one group being systematically over-projected")
         st.dataframe(pd.DataFrame(report["by_position"]), hide_index=True, use_container_width=True)
+        _warn_about_degenerate_groups(report["by_position"])
 
     if report["by_sport"]:
-        st.markdown("**By sport and site**")
+        st.markdown("**By sport and site** — every pair, not just the one above")
         st.dataframe(pd.DataFrame(report["by_sport"]), hide_index=True, use_container_width=True)
+
+
+def _warn_about_degenerate_groups(rows: list[dict]) -> None:
+    """Name the position groups whose skill score measures nothing.
+
+    A group where every player scored the same has no ordering to get
+    right, so its skill collapses to whether the model's average sits
+    nearer that one number than the site's does. These groups post the
+    highest scores in the table and read as the model's best positions,
+    which is the exact opposite of what they are.
+    """
+
+    flagged = [
+        row for row in rows
+        if row["count"] > 1
+        and row["correlation"] == 0.0
+        and abs(row["mae"] - abs(row["bias"])) < 1e-9
+    ]
+
+    if not flagged:
+        return
+
+    named = ", ".join(
+        f"**{row['scope']}** ({row['count']}, skill {row['skill']:+.3f})"
+        if row["skill"] is not None else f"**{row['scope']}** ({row['count']})"
+        for row in flagged
+    )
+
+    st.warning(
+        f"{named} — every player in "
+        f"{'this group' if len(flagged) == 1 else 'these groups'} finished on "
+        "the same score, almost always zero. There is no ordering to get right, "
+        "so the skill shown is only the model projecting lower than the site "
+        "average did. Read those rows as noise, not as your best positions.",
+        icon="⚠️",
+    )
 
 
 if __name__ == "__main__":

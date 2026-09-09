@@ -644,3 +644,61 @@ def test_the_count_is_of_every_slate_and_not_of_the_page(database):
     assert database.slate_count() == 4
     assert len(database.slates_with_players(since="2026-09-02")) == 2
     assert empty not in {row["id"] for row in database.slates_with_players()}
+
+
+def test_a_record_can_be_read_for_one_site(database):
+    """The board shows one sport-site pair at a time and had no way to
+    ask for one. It read every slate for the sport, so a DraftKings
+    record appeared under a FanDuel heading with only a small scope
+    cell to say otherwise."""
+
+    for site, points in (("DK", 28.0), ("FD", 14.0)):
+        slate = database.upsert_slate("MLB", site, "2026-09-09")
+        database.save_salaries(slate, _players(f"{site}p", 1, sport="MLB"))
+        database.save_projection(
+            slate, {"player_id": f"{site}p0", "projected_points": 30.0}
+        )
+        database.lock_slate(slate)
+        database.save_actual(slate, {"player_id": f"{site}p0", "actual_points": points})
+
+    assert len(database.resolved_projections("MLB")) == 2
+    assert len(database.resolved_projections("MLB", "DK")) == 1
+    assert database.resolved_projections("MLB", "DK")[0]["actual_points"] == 28.0
+    assert database.resolved_projections("MLB", "FD")[0]["actual_points"] == 14.0
+    assert database.resolved_projections("NFL", "DK") == []
+
+
+def test_a_locked_projection_is_never_rewritten(database):
+    """The claim the whole forward record rests on, which was false.
+
+    The projections table upserted on conflict with no regard for
+    `locked_at`, so re-opening a slate you locked yesterday re-ran the
+    engine and replaced the forecast in place. Calibration then scored
+    a number written after the games, built on history the original
+    projection never had -- a look-ahead leak into the one measurement
+    that exists to be free of it. Nothing errored and the skill figure
+    simply moved.
+    """
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-09")
+    database.save_salaries(slate, _players("p", 1, sport="MLB"))
+    database.save_projection(slate, {"player_id": "p0", "projected_points": 12.0})
+    database.lock_slate(slate)
+
+    database.save_projection(slate, {"player_id": "p0", "projected_points": 9.0})
+    database.save_actual(slate, {"player_id": "p0", "actual_points": 15.0})
+
+    assert database.resolved_projections("MLB", "DK")[0]["projected_points"] == 12.0
+
+
+def test_an_unlocked_projection_is_still_replaced(database):
+    """The other half: before lock, re-projecting is the point."""
+
+    slate = database.upsert_slate("MLB", "DK", "2026-09-09")
+    database.save_salaries(slate, _players("p", 1, sport="MLB"))
+    database.save_projection(slate, {"player_id": "p0", "projected_points": 3.0})
+    database.save_projection(slate, {"player_id": "p0", "projected_points": 7.0})
+    database.lock_slate(slate)
+    database.save_actual(slate, {"player_id": "p0", "actual_points": 5.0})
+
+    assert database.resolved_projections("MLB", "DK")[0]["projected_points"] == 7.0

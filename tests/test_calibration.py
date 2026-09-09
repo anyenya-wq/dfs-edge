@@ -15,16 +15,27 @@ from dfs.projections.calibration import (
 )
 
 
-def _records(count, model_noise, baseline_noise, bias=0.0, position="PG", seed=3):
+def _records(
+    count, model_noise, baseline_noise, bias=0.0, position="PG", seed=3, slates=8,
+):
+    """A believable resolved record.
+
+    Spread across several slate dates by default, because that is what
+    a record worth judging looks like. A few hundred projections from a
+    single evening is one night of results wearing a large n, and the
+    verdict now says so rather than reading the skill number.
+    """
+
     generator = random.Random(seed)
     rows = []
-    for _ in range(count):
+    for index in range(count):
         true = generator.uniform(5, 45)
         rows.append(
             {
                 "positions": [position],
                 "sport": "NBA",
                 "site": "DK",
+                "slate_date": f"2026-01-{(index % slates) + 1:02d}",
                 "projected_points": true + generator.gauss(bias, model_noise),
                 "site_avg_points": true + generator.gauss(0, baseline_noise),
                 "actual_points": max(true + generator.gauss(0, 7), 0),
@@ -133,3 +144,136 @@ def test_ownership_is_scored_separately():
     ]
     assert ownership_calibration(rows).count == 2
     assert ownership_calibration([{"projected_ownership": 1.0}]) is None
+
+
+# ----------------------------------------------------------------------
+# What a skill number is not saying
+# ----------------------------------------------------------------------
+#
+# Written from a real MLB record, where the headline read +0.089 and
+# the two strongest position groups were players who never scored.
+
+
+def _zero_group(count, projection, site_average, position="SP"):
+    """A group where everyone finished on nothing."""
+
+    return [
+        {
+            "positions": [position],
+            "sport": "MLB",
+            "site": "DK",
+            "slate_date": "2026-09-09",
+            "projected_points": projection,
+            "site_avg_points": site_average,
+            "actual_points": 0.0,
+        }
+        for _ in range(count)
+    ]
+
+
+def test_a_group_that_all_scored_zero_is_marked_degenerate():
+    """The signature, taken from the real record: bias equals MAE
+    exactly and correlation is exactly zero. Both follow from every
+    actual being identical, and neither is visible as a problem in a
+    table of ten position rows."""
+
+    result = score_projections(_zero_group(62, 7.251, 9.106))
+
+    assert result.degenerate
+    assert result.zeros == result.count == 62
+    assert result.bias == result.mae
+    assert result.correlation == 0.0
+    # And the "skill" is nothing but the ratio of the two means.
+    assert result.skill == pytest.approx(1 - 7.251 / 9.106, abs=5e-5)
+
+
+def test_a_group_with_real_outcomes_is_not_marked_degenerate():
+    result = score_projections(_records(60, 3.0, 8.0))
+
+    assert not result.degenerate
+    assert result.correlation != 0.0
+
+
+def test_the_scored_only_record_excludes_players_who_managed_nothing():
+    records = _records(100, 3.0, 8.0) + _zero_group(50, 7.0, 9.0)
+
+    report = calibration_report(records)
+    overall, played = report["overall"], report["played"]
+
+    # Not 100: a hitter who goes hitless scores zero too, and the
+    # fixture clamps at zero for the same reason the sites do. What is
+    # asserted is the relationship, since nothing here can tell a real
+    # zero from a player who never took the field.
+    assert overall["count"] == 150
+    assert overall["zeros"] >= 50
+    assert played["count"] == overall["count"] - overall["zeros"]
+    assert played["zeros"] == 0
+
+
+def test_a_record_carried_by_zero_scorers_says_so():
+    """The warning that matters. A third of these scored nothing, and
+    the margin on them is arithmetic rather than an edge."""
+
+    records = _records(100, 6.0, 6.0, slates=8) + _zero_group(50, 7.0, 9.0)
+
+    report = calibration_report(records)
+    warning = report["sample_warning"]
+    share = report["overall"]["zeros"] / report["overall"]["count"]
+
+    assert "scored" in warning and "nothing" in warning
+    assert f"{share:.0%}" in warning
+    assert "projecting lower" in warning
+    # And it says what the record looks like without them.
+    assert f"{report['played']['skill']:+.3f}" in warning
+
+
+def test_a_record_from_one_slate_is_not_read_as_an_edge():
+    """826 projections from a single evening is not 826 observations."""
+
+    report = calibration_report(_records(826, 3.0, 8.0, slates=1))
+
+    assert "1 slate" in report["verdict"]
+    assert "too few days" in report["verdict"].lower()
+    assert "meaningfully better" not in report["verdict"].lower()
+
+
+def test_a_forward_record_from_one_slate_says_the_loop_works_not_that_it_wins():
+    rows = _records(826, 3.0, 8.0, slates=1)
+    for row in rows:
+        # The flag the database computes, not a timestamp: a projection
+        # is forward when it was written on or before its slate date.
+        row["forward"] = 1
+
+    verdict = calibration_report(rows)["forward_verdict"]
+
+    assert "loop works" in verdict
+    assert "not enough to show an edge" in verdict
+
+
+def test_slates_are_counted_across_sites_and_sports_not_just_dates():
+    """Two sites on the same evening are two slates, not one day.
+
+    They price and score differently, so a projection for each is a
+    separate test of the model even though the games are the same.
+    """
+
+    rows = _records(40, 3.0, 8.0, slates=1)
+    for index, row in enumerate(rows):
+        row["site"] = "DK" if index % 2 else "FD"
+
+    assert score_projections(rows).slates == 2
+
+
+def test_the_comparison_table_can_span_what_the_headline_excludes():
+    """The board filters the headline to one sport and site and still
+    wants the table underneath to compare across them."""
+
+    dk = _records(30, 3.0, 8.0)
+    fd = _records(30, 3.0, 8.0, seed=9)
+    for row in fd:
+        row["site"] = "FD"
+
+    report = calibration_report(dk, comparison=dk + fd)
+
+    assert report["overall"]["count"] == 30
+    assert {row["scope"] for row in report["by_sport"]} == {"NBA:DK", "NBA:FD"}
