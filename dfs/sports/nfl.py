@@ -7,11 +7,16 @@ roughly a point and a half more on DraftKings than on FanDuel, which is
 enough to move them past a boom-bust deep threat at the same salary.
 Never carry a projection built for one site over to the other.
 
-DraftKings also pays yardage bonuses that FanDuel does not. They are
-step functions at 100 rushing, 100 receiving, and 300 passing yards, so
+Both sites pay the same three yardage bonuses -- 100 rushing, 100
+receiving, 300 passing, three points each. They are step functions, so
 they contribute little to a mean projection and a great deal to a
-ceiling -- which is why they are modelled as bonuses rather than folded
+ceiling, which is why they are modelled as bonuses rather than folded
 into the linear rates.
+
+Scoring on both sides was read from the sites themselves: DraftKings
+from its published NFL Classic rules, FanDuel from a contest's own
+Rules & Scoring tab. What neither source showed is roster shape --
+FanDuel's salary cap and its per-team limit are still assumed.
 """
 
 from __future__ import annotations
@@ -69,6 +74,7 @@ _FD_SCORING = {
     "fumble_lost": -2.0,
     "two_point_conv": 2.0,
     "return_td": 6.0,
+    "fumble_recovery_td": 6.0,
 }
 
 # Defence scores on a different axis from everyone else -- takeaways
@@ -89,6 +95,13 @@ _DST_SCORING = {
     "def_td": 6.0,
     "return_td": 6.0,
     "blocked_kick": 2.0,
+    # Two points for running back a missed extra point or a failed
+    # two-point try. Nothing in the collector feeds this yet -- nflverse
+    # publishes no column for it and it happens a couple of times a
+    # season league-wide -- but it is in both rule sets, and a scoring
+    # table that quietly omits a rule is the kind of table you stop
+    # being able to audit.
+    "extra_point_return": 2.0,
 }
 
 # Points allowed, banded. Read as "up to this many points, this many
@@ -132,6 +145,7 @@ DK_NFL = SportConfig(
     alt_scoring_positions=("DST", "DEF"),
     alt_scoring=_DST_SCORING,
     tiers=(_POINTS_ALLOWED,),
+    rules_verified=True,
 )
 
 FD_NFL = SportConfig(
@@ -147,14 +161,22 @@ FD_NFL = SportConfig(
         RosterSlot("DEF", ("DST", "DEF")),
     ),
     scoring=_FD_SCORING,
-    bonuses=(),
+    bonuses=(
+        Bonus("pass_yd", 300, 3.0),
+        Bonus("rush_yd", 100, 3.0),
+        Bonus("rec_yd", 100, 3.0),
+    ),
     opportunity_stat="snaps",
     # FanDuel caps skill players from one team at four, which rules out
-    # the deepest onslaught stacks that DraftKings permits.
+    # the deepest onslaught stacks that DraftKings permits. Assumed, not
+    # read: the Rules & Scoring tab covers scoring and says nothing about
+    # roster construction, so this and the cap above are the two numbers
+    # here still waiting on the lineup rules page.
     max_per_team=4,
     min_games=2,
     stack_shapes=_STACKS,
     alt_scoring_positions=("DST", "DEF"),
     alt_scoring=_DST_SCORING,
     tiers=(_POINTS_ALLOWED,),
+    rules_verified=True,
 )

@@ -55,6 +55,10 @@ BLOCK_COLUMNS = ("def_punt_blocks", "def_fg_blocks", "def_pat_blocks")
 # the indirection.
 SACKS_SUFFERED_COLUMN = "sacks_suffered"
 
+# Read twice: once as this team's own scoring, and once by the other
+# team, which does not get charged for it.
+DEFENSIVE_TD_COLUMN = "def_tds"
+
 
 class ScoreboardError(RuntimeError):
     """Raised when the scoreboard cannot be retrieved."""
@@ -136,6 +140,10 @@ def defence_records(
     # its own sack count off the offence it was facing.
     suffered: dict[tuple[str, str], float] = defaultdict(float)
 
+    # Defensive touchdowns by each team in each game, so the other
+    # defence can subtract them from its points allowed. See below.
+    returned: dict[tuple[str, str], float] = defaultdict(float)
+
     for row in rows:
         team = normalise_team(row.get("team"))
         if not team:
@@ -167,6 +175,7 @@ def defence_records(
         game_id = (row.get("game_id") or "").strip()
         if game_id:
             suffered[(game_id, team)] += _as_float(row.get(SACKS_SUFFERED_COLUMN))
+            returned[(game_id, team)] += _as_float(row.get(DEFENSIVE_TD_COLUMN))
 
         # Kept as the fallback for when the opposing team has no rows in
         # this file at all.
@@ -188,9 +197,26 @@ def defence_records(
             continue
 
         stats = {key: value for key, value in entry["stats"].items()}
-        stats["points_allowed"] = allowed
-
         opponent = entry["opponent"]
+
+        # The scoreboard has the opponent's final score. Points allowed
+        # is not that number: both sites exclude touchdowns the opposing
+        # DEFENCE scored on your offence. A pick-six against your
+        # quarterback is charged to your quarterback, not to your
+        # defence, which was not on the field for it.
+        #
+        # Only defensive scores are excluded. Kick and punt returns are
+        # not -- those are scored on your special teams, which is the
+        # same fantasy unit -- and neither is the extra point after a
+        # pick-six, which DraftKings lists as points allowed even though
+        # the touchdown before it is not. Six points a time, and this is
+        # a band rather than a rate: it is the difference between the
+        # 7-13 band and the 14-20 one, three fantasy points, which is
+        # most of what separates a good defence play from an average
+        # one.
+        conceded = returned.get((entry["game_id"], opponent), 0.0) if opponent else 0.0
+        stats["points_allowed"] = max(0.0, allowed - 6.0 * conceded)
+
         facing = suffered.get((entry["game_id"], opponent)) if opponent else None
         stats["sack"] = entry["credited_sacks"] if facing is None else facing
 

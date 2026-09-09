@@ -82,9 +82,26 @@ and the optimizer was counting every player, so a five-man stack
 alongside that team's own pitcher -- a legal lineup -- could not be
 built. Caps now name the positions they exclude.
 
-Still unverified at source: both NFL pairs, both NBA pairs, both NHL
-pairs, and both EPL pairs. Each carries a note in the app naming what
-specifically is unchecked.
+**Both NFL pairs are now read from the sites too** -- DraftKings from
+its NFL Classic rules page, FanDuel from a contest's own Rules &
+Scoring tab. Two things were wrong. FanDuel was set to pay no yardage
+bonuses; it pays all three, at 100 rushing, 100 receiving and 300
+passing yards, three points each, which had been depressing every
+FanDuel ceiling and so every tournament build. And points allowed was
+read as the opponent's final score, when both sites exclude touchdowns
+the opposing *defence* scored on your own offence -- six points a time,
+against a banded scale, so a pick-six was silently costing a defence up
+to three fantasy points it should have kept.
+
+A verified table can still have an unverified corner. FanDuel's scoring
+tab covers scoring and nothing else, so its $60,000 cap and
+four-per-team limit remain assumed, and both the app and the CLI now
+print the caveat on a verified table instead of only on an unverified
+one -- which is where two such notes had been sitting unread.
+
+Still unverified at source: both NBA pairs, both NHL pairs, and both
+EPL pairs. Each carries a note in the app naming what specifically is
+unchecked.
 
 ## 2. Hosting — done
 

@@ -45,20 +45,44 @@ def test_nfl_reception_scoring_differs_by_site():
     assert dk - fd == pytest.approx(4.0)
 
 
-def test_draftkings_yardage_bonus_is_a_step_function():
-    config = get_config("NFL", "DK")
-    under = score_stat_line({"rush_yd": 99}, ["RB"], config)
-    over = score_stat_line({"rush_yd": 100}, ["RB"], config)
+@pytest.mark.parametrize("site", ["DK", "FD"])
+@pytest.mark.parametrize("stat, threshold", [
+    ("rush_yd", 100), ("rec_yd", 100), ("pass_yd", 300),
+])
+def test_nfl_yardage_bonus_is_a_step_function_on_both_sites(site, stat, threshold):
+    """Both sites pay all three, which is not what this file used to say.
 
-    assert over - under == pytest.approx(3.1)
+    It asserted FanDuel paid none. Read from a FanDuel contest's own
+    Rules & Scoring tab, which lists 100+ ReY, 100+ RuY and 300+ PaY at
+    three points each. A missing bonus is invisible in a mean and
+    decisive in a ceiling, so the tournament build was the half that
+    was wrong.
+    """
+
+    config = get_config("NFL", site)
+    rate = config.scoring[stat]
+    under = score_stat_line({stat: threshold - 1}, ["RB"], config)
+    over = score_stat_line({stat: threshold}, ["RB"], config)
+
+    assert over - under == pytest.approx(3.0 + rate)
 
 
-def test_fanduel_pays_no_yardage_bonus():
-    config = get_config("NFL", "FD")
-    under = score_stat_line({"rush_yd": 99}, ["RB"], config)
-    over = score_stat_line({"rush_yd": 100}, ["RB"], config)
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_a_returned_extra_point_pays_the_defence_two(site):
+    config = get_config("NFL", site)
+    line = {"points_allowed": 24, "extra_point_return": 1}
 
-    assert over - under == pytest.approx(0.1)
+    assert score_stat_line(line, ["DST"], config) == pytest.approx(2.0)
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_nfl_scoring_tables_have_been_read_from_the_sites(site):
+    """Guards the flag itself. An unverified table still produces
+    confident-looking numbers, so the only thing standing between a
+    guessed rule and a real entry is this boolean and the warning the
+    board hangs off it."""
+
+    assert get_config("NFL", site).rules_verified
 
 
 def test_double_double_bonus_is_draftkings_only():
@@ -219,3 +243,76 @@ def test_the_team_limit_counts_hitters_and_not_pitchers():
 def test_a_sport_without_an_exclusion_counts_everyone():
     assert get_config("NFL", "FD").counts_toward_team_cap(["QB"])
     assert get_config("NBA", "DK").counts_toward_team_cap(["PG"])
+
+
+# ----------------------------------------------------------------------
+# The NFL tables, as published
+# ----------------------------------------------------------------------
+#
+# Transcribed from the sites: DraftKings from its NFL Classic rules
+# page, FanDuel from a contest's own Rules & Scoring tab. Kept verbatim
+# and asserted whole rather than spot-checked, because the failure mode
+# these guard is a single wrong rate that nothing else notices -- a
+# projection built on it is not obviously wrong, it is just quietly
+# beaten. Change a number here only with the site open.
+
+PUBLISHED_NFL_OFFENCE = {
+    "DK": {
+        "pass_yd": 0.04, "pass_td": 4.0, "pass_int": -1.0,
+        "rush_yd": 0.1, "rush_td": 6.0,
+        "rec": 1.0, "rec_yd": 0.1, "rec_td": 6.0,
+        "fumble_lost": -1.0, "two_point_conv": 2.0,
+        "return_td": 6.0, "fumble_recovery_td": 6.0,
+    },
+    "FD": {
+        "pass_yd": 0.04, "pass_td": 4.0, "pass_int": -1.0,
+        "rush_yd": 0.1, "rush_td": 6.0,
+        "rec": 0.5, "rec_yd": 0.1, "rec_td": 6.0,
+        "fumble_lost": -2.0, "two_point_conv": 2.0,
+        "return_td": 6.0, "fumble_recovery_td": 6.0,
+    },
+}
+
+# Identical on the two sites, which is worth stating rather than
+# assuming: it was assumed here for a while, and the assumption was
+# only checked afterwards.
+PUBLISHED_NFL_DEFENCE = {
+    "sack": 1.0, "def_int": 2.0, "fumble_recovery": 2.0, "safety": 2.0,
+    "def_td": 6.0, "return_td": 6.0, "blocked_kick": 2.0,
+    "extra_point_return": 2.0,
+}
+
+PUBLISHED_POINTS_ALLOWED = [
+    (0, 10.0), (3, 7.0), (6, 7.0), (7, 4.0), (13, 4.0),
+    (14, 1.0), (20, 1.0), (21, 0.0), (27, 0.0),
+    (28, -1.0), (34, -1.0), (35, -4.0), (52, -4.0),
+]
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_nfl_offence_table_matches_what_the_site_publishes(site):
+    assert get_config("NFL", site).scoring == PUBLISHED_NFL_OFFENCE[site]
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_nfl_defence_table_matches_what_the_site_publishes(site):
+    assert get_config("NFL", site).alt_scoring == PUBLISHED_NFL_DEFENCE
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+@pytest.mark.parametrize("allowed, points", PUBLISHED_POINTS_ALLOWED)
+def test_nfl_points_allowed_bands_match_what_the_site_publishes(site, allowed, points):
+    config = get_config("NFL", site)
+
+    assert score_stat_line({"points_allowed": allowed}, ["DST"], config) == points
+
+
+@pytest.mark.parametrize("site", ["DK", "FD"])
+def test_nfl_pays_all_three_yardage_bonuses(site):
+    bonuses = {(b.stat, b.threshold): b.points for b in get_config("NFL", site).bonuses}
+
+    assert bonuses == {
+        ("pass_yd", 300): 3.0,
+        ("rush_yd", 100): 3.0,
+        ("rec_yd", 100): 3.0,
+    }

@@ -45,6 +45,8 @@ def _build(args: argparse.Namespace) -> int:
     note = VERIFICATION_NOTES.get(config.key)
     if note and not config.rules_verified:
         print(f"!! Scoring rules unverified for {config.key}: {note}\n")
+    elif note:
+        print(f"   Rules for {config.key}: {note}\n")
 
     for warning in result.warnings:
         print(f"!  {warning}")

@@ -200,6 +200,70 @@ def test_points_allowed_is_what_the_other_side_scored():
     assert records["KC"]["stats"]["points_allowed"] == 20
 
 
+def test_a_pick_six_is_not_charged_to_the_defence_that_did_not_concede_it():
+    """Both sites exclude touchdowns the opposing DEFENCE scored.
+
+    Kansas City scored 27 against Baltimore, but seven of those came
+    from a Kansas City defensive touchdown against Baltimore's offence.
+    Baltimore's defence was not on the field for it, so it is charged
+    21 -- and the extra point still counts, which is why the number is
+    21 and not 20.
+
+    Worth a test because it moves a band, not a rate: 27 sits in the
+    28-34 band's neighbour and 21 in the 21-27 one. Read wrong, every
+    defence that ever faced a pick-six looks worse than it played.
+    """
+
+    rows = [
+        _row(team="BAL", opponent_team="KC"),
+        _row(team="KC", opponent_team="BAL", def_tds=1),
+    ]
+
+    records = {r["team"]: r for r in
+               defence_records(rows, 2024, parse_scoreboard(SCOREBOARD), _week_date)}
+
+    assert records["BAL"]["stats"]["points_allowed"] == 21
+    # Baltimore scored none, so Kansas City's own figure is untouched.
+    assert records["KC"]["stats"]["points_allowed"] == 20
+    # And the touchdown still pays the defence that scored it.
+    assert records["KC"]["stats"]["def_td"] == 1
+
+
+def test_a_return_touchdown_is_still_charged_to_the_defence():
+    """The other half of the rule, and the reason it is not simply
+    "subtract every touchdown the other side returned". A kick or punt
+    return is scored on your special teams, which is the same fantasy
+    unit as your defence, so it counts against you."""
+
+    rows = [
+        _row(team="BAL", opponent_team="KC"),
+        _row(team="KC", opponent_team="BAL", special_teams_tds=1),
+    ]
+
+    records = {r["team"]: r for r in
+               defence_records(rows, 2024, parse_scoreboard(SCOREBOARD), _week_date)}
+
+    assert records["BAL"]["stats"]["points_allowed"] == 27
+
+
+def test_points_allowed_never_goes_negative():
+    """A defensive touchdown is worth more than the whole final score
+    only if something upstream is wrong -- a mismatched game_id, a
+    score not yet final. Clamped rather than trusted, because a
+    negative here lands in the shutout band and pays ten points."""
+
+    rows = [
+        _row(team="ARI", opponent_team="LAR", week=2, game_id="2024_02_LA_ARI"),
+        _row(team="LAR", opponent_team="ARI", week=2, game_id="2024_02_LA_ARI",
+             def_tds=9),
+    ]
+
+    records = {r["team"]: r for r in
+               defence_records(rows, 2024, parse_scoreboard(SCOREBOARD), _week_date)}
+
+    assert records["ARI"]["stats"]["points_allowed"] == 0
+
+
 def test_a_game_with_no_score_yet_is_not_a_double_shutout():
     """The failure worth guarding: a fixture read as 0-0 pays both
     defences ten points for a game nobody has played."""

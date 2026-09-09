@@ -813,8 +813,9 @@ def main() -> None:
             f"are modelled from history rather than the site average.{freshness}"
         )
 
+    note = VERIFICATION_NOTES.get(config.key, "")
+
     if not config.rules_verified:
-        note = VERIFICATION_NOTES.get(config.key, "")
         st.warning(
             f"**Scoring rules for {config.key} are unverified.** {note} "
             "Projections built on an incorrect scoring table will be wrong in "
@@ -822,6 +823,13 @@ def main() -> None:
             "entering real contests.",
             icon="⚠️",
         )
+    elif note:
+        # A verified table can still have an unverified corner -- a cap
+        # or a per-team limit that a scoring page does not cover. These
+        # notes used to be written down and then shown only when the
+        # table was unverified, which for a caveat on a verified table
+        # is the same as not writing it down at all.
+        st.caption(f"Rules for {config.key}: {note}")
 
     # Stashed rather than shown where it is raised, because the run
     # that raises it ends in a rerun and a rerun throws away everything
