@@ -1133,7 +1133,7 @@ def _show_leverage(pool: list[dict], ceiling_weight: float, ownership_penalty: f
     )
 
 
-def _confirmation(player_id: str, by_id: dict) -> str:
+def _confirmation(player_id: str, by_id: dict, posted: frozenset = frozenset()) -> str:
     """Whether the site has confirmed this player is in today's game.
 
     Shown on a built lineup because that is where it is acted on. A
@@ -1141,6 +1141,14 @@ def _confirmation(player_id: str, by_id: dict) -> str:
     on four players nobody has confirmed, and that is not visible from
     the projections -- an unconfirmed hitter projects exactly like a
     confirmed one.
+
+    Announced and confirmed are different for a pitcher, and the gap
+    matters: a probable starter can be scratched on the morning of the
+    game, a pitcher named on a published lineup card cannot. The
+    difference is read from whether his team has posted its batting
+    order rather than from the site's own code for it -- the codes vary
+    (`SP`, `P`, `PLR`, `PO` all appear) and a posted lineup is the fact
+    underneath them.
     """
 
     player = by_id.get(str(player_id))
@@ -1156,15 +1164,16 @@ def _confirmation(player_id: str, by_id: dict) -> str:
         return f"✓ #{int(order)}"
 
     if player.get("starting"):
-        return f"✓ {player['starting']}"
+        confirmed = str(player.get("team") or "") in posted
+        return "✓ starting" if confirmed else "~ probable"
 
     return "—"
 
 
-def _confirmed_count(lineup, by_id: dict) -> int:
+def _confirmed_count(lineup, by_id: dict, posted: frozenset = frozenset()) -> int:
     return sum(
         1 for player in lineup.players
-        if _confirmation(player.player_id, by_id).startswith("✓")
+        if _confirmation(player.player_id, by_id, posted).startswith("✓")
     )
 
 
@@ -1201,9 +1210,10 @@ def _show_lineups(lineups: list, config, requested: int, attempted: bool = False
     _show_export(lineups, config)
 
     by_id = {str(player["player_id"]): player for player in (pool or [])}
+    posted = frozenset(teams_with_posted_lineups(pool or []))
 
     for index, lineup in enumerate(lineups, start=1):
-        confirmed = _confirmed_count(lineup, by_id)
+        confirmed = _confirmed_count(lineup, by_id, posted)
         header = (
             f"Lineup {index} — ${lineup.total_salary:,} · "
             f"proj {lineup.total_projection:.1f} · "
@@ -1218,7 +1228,7 @@ def _show_lineups(lineups: list, config, requested: int, attempted: bool = False
                         {
                             "Slot": player.slot,
                             "Player": player.name,
-                            "In": _confirmation(player.player_id, by_id),
+                            "In": _confirmation(player.player_id, by_id, posted),
                             "Team": player.team,
                             "Opp": player.opponent,
                             "Salary": player.salary,

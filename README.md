@@ -190,9 +190,20 @@ each player today — a batting slot (`#3`), a pitcher code (`SP`), `OUT`,
 or blank for not yet known.
 
 Built lineups carry the same mark: `✓ #3` for a hitter confirmed batting
-third, `✓ SP` for an announced pitcher, `—` for nobody has said yet. Each
-lineup's header counts them — *5/10 confirmed* — so the ones resting on
-unconfirmed players are visible without opening them.
+third, `✓ starting` for a pitcher on a published lineup card,
+`~ probable` for one who is announced but not yet confirmed, `—` for
+nobody has said yet. Each lineup's header counts them — *4/10 confirmed*
+— so the ones resting on unconfirmed players are visible without
+opening them.
+
+The pitcher distinction is real money. A probable starter can be
+scratched on the morning of the game; one named on a published lineup
+card cannot. It is derived from whether his team has posted its batting
+order, not from the site's own code, because the codes vary — `SP`, `P`,
+`PLR` and `PO` all appear in a single file — while a posted lineup is
+the fact underneath all of them. On one real slate the codes tracked it
+exactly: every `SP` game had both lineups posted and every `P` game had
+neither.
 
 It is not in the upload file, which the site wants as ids and nothing
 else. It exists for the decision you make before uploading: a lineup can
